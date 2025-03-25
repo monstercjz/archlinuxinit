@@ -16,13 +16,17 @@ SSH_INSTALL() {
 
 install_ssh_server() {
   echo "正在安装 SSH..."
-  # 使用 pacman 安装 openssh
-  sudo pacman -S openssh --noconfirm
-  # 启动 sshd 服务
-  sudo systemctl start sshd
-  # 设置 sshd 服务开机自启
-  sudo systemctl enable sshd
-  echo "SSH 安装完成"
+  if pacman -Q openssh &>/dev/null; then
+    echo "SSH 已经安装"
+  else
+    # 使用 pacman 安装 openssh
+    sudo pacman -S openssh --noconfirm
+    # 启动 sshd 服务
+    sudo systemctl start sshd
+    # 设置 sshd 服务开机自启
+    sudo systemctl enable sshd
+    echo "SSH 安装完成"
+  fi
   SSH_INSTALL
 }
 

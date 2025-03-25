@@ -20,33 +20,45 @@ AUR_HELPER_MENU() {
 
 install_yay() {
   echo "正在安装 yay..."
-  # 克隆 yay git 仓库
-  git clone https://aur.archlinux.org/yay.git
-  cd yay
-  # 编译安装 yay
-  makepkg -si
-  cd ..
-  echo "yay 安装完成"
+  if command -v yay &>/dev/null; then
+    echo "yay 已经安装"
+  else
+    # 克隆 yay git 仓库
+    git clone https://aur.archlinux.org/yay.git
+    cd yay
+    # 编译安装 yay
+    makepkg -si
+    cd ..
+    echo "yay 安装完成"
+  fi
   AUR_HELPER_MENU
 }
 
 install_paru() {
   echo "正在安装 paru..."
-  # 克隆 paru git 仓库
-  git clone https://aur.archlinux.org/paru.git
-  cd paru
-  # 编译安装 paru
-  makepkg -si
-  cd ..
-  echo "paru 安装完成"
+  if command -v paru &>/dev/null; then
+    echo "paru 已经安装"
+  else
+    # 克隆 paru git 仓库
+    git clone https://aur.archlinux.org/paru.git
+    cd paru
+    # 编译安装 paru
+    makepkg -si
+    cd ..
+    echo "paru 安装完成"
+  fi
   AUR_HELPER_MENU
 }
 
 install_octopi() {
   echo "正在安装 octopi..."
-  # 使用 pacman 安装 octopi
-  sudo pacman -S octopi --noconfirm
-  echo "octopi 安装完成"
+  if pacman -Q octopi &>/dev/null; then
+    echo "octopi 已经安装"
+  else
+    # 使用 pacman 安装 octopi
+    sudo pacman -S octopi --noconfirm
+    echo "octopi 安装完成"
+  fi
   AUR_HELPER_MENU
 }
 

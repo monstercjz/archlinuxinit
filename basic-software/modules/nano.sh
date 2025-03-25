@@ -16,9 +16,13 @@ NANO_INSTALL() {
 
 install_nano_editor() {
   echo "正在安装 nano..."
-  # 使用 pacman 安装 nano
-  sudo pacman -S nano --noconfirm
-  echo "nano 安装完成"
+  if pacman -Q nano &>/dev/null; then
+    echo "nano 已经安装"
+  else
+    # 使用 pacman 安装 nano
+    sudo pacman -S nano --noconfirm
+    echo "nano 安装完成"
+  fi
   NANO_INSTALL
 }
 
