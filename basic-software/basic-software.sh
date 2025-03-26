@@ -2,64 +2,130 @@
 
 # basic-software/basic-software.sh
 
+# 颜色变量
+COLOR_BLUE="\e[34m"
+COLOR_GREEN="\e[32m"
+COLOR_RED="\e[31m"
+COLOR_YELLOW="\e[33m"
+COLOR_RESET="\e[0m"
+
+# 日志变量
+LOG_DIR="/var/log/arch-init"
+LOG_FILE="$LOG_DIR/basic_software.log"
+
+# 确保日志目录存在
+ensure_log_dir() {
+  if [ ! -d "$LOG_DIR" ]; then
+    echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+    echo -e "${COLOR_BLUE}步骤 0: 创建日志目录${COLOR_RESET}"
+    echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+    echo "开始创建日志目录 $LOG_DIR"
+    if sudo mkdir -p "$LOG_DIR"; then
+      echo "日志目录创建完成: $LOG_DIR"
+      log "INFO" "日志目录创建完成: $LOG_DIR"
+    else
+      echo "日志目录创建失败"
+      log "ERROR" "日志目录创建失败"
+      exit 1
+    fi
+  fi
+}
+
+# 确保日志文件存在并有写权限
+ensure_log_file() {
+  if [ ! -f "$LOG_FILE" ]; then
+    echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+    echo -e "${COLOR_BLUE}步骤 1: 创建日志文件${COLOR_RESET}"
+    echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+    echo "开始创建日志文件 $LOG_FILE"
+    if sudo touch "$LOG_FILE"; then
+      echo "日志文件创建完成: $LOG_FILE"
+      log "INFO" "日志文件创建完成: $LOG_FILE"
+      sudo chmod 640 "$LOG_FILE"
+      log "INFO" "设置日志文件权限为 640"
+    else
+      echo "日志文件创建失败"
+      log "ERROR" "日志文件创建失败"
+      exit 1
+    fi
+  fi
+}
+
+log() {
+  local level="$1"
+  local message="$2"
+  local color
+
+  case "$level" in
+    INFO)
+      color=$(tput setaf 2)  # Green
+      ;;
+    WARNING)
+      color=$(tput setaf 3)  # Yellow
+      ;;
+    ERROR)
+      color=$(tput setaf 1)  # Red
+      ;;
+    *)
+      color=$(tput setaf 4)  # Blue
+      ;;
+  esac
+
+  # 终端输出带颜色的日志
+  echo -e "$(date '+%Y-%m-%d %H:%M:%S') - [$level] $message" | sed "s/^/$color/" | sed "s/$/$(tput s写入纯文本gr0)/"
+
+  # 文件中日志
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - [$level] $message" | sudo tee -a $LOG_FILE > /dev/null
+}
+
+confirm_action() {
+  read -p "$(echo -e "${COLOR_GREEN}确认执行此操作? (y/n): ${COLOR_RESET}")" confirm
+  if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+    echo -e "${COLOR_RED}操作已取消${COLOR_RESET}"
+    log "INFO" "操作已取消"
+    return 1
+  fi
+}
+
 basic_software_menu() {
-  echo "基础软件菜单"
-  echo "1. 安装 AUR 助手"
-  echo "2. 安装 SSH"
-  echo "3. 安装 nano"
-  echo "4. 安装输入法"
-  echo "5. 防火墙配置"
-  echo "b. 返回主菜单"
+  echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+  echo -e "${COLOR_BLUE}基础软件菜单${COLOR_RESET}"
+  echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}1. 安装 AUR 助手${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}2. 安装 SSH${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}3. 安装 nano${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}4. 安装输入法${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}5. 防火墙配置${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}b. 返回主菜单${COLOR_RESET}"
   read -p "请选择菜单: " choice
   case $choice in
-    1) aur_helper_menu ;;
-    2) ssh_install ;;
-    3) nano_install ;;
-    4) input_method_install ;;
-    5) firewall_config ;;
-    b) main_menu ;;
+    1) install_software aur-helper ;;
+    2) install_software ssh ;;
+    3) install_software nano ;;
+    4) install_software input-method ;;
+    5) install_software firewall ;;
+    b) exit 0  ;;
     *) echo "无效选择" ;;
   esac
 }
 
-aur_helper_menu() {
-  echo "安装 AUR 助手菜单"
-  echo "1. 安装 yay"
-  echo "2. 安装 paru"
-  echo "3. 安装 octopi"
-  echo "b. 返回基础软件菜单"
-  read -p "请选择菜单: " choice
-  case $choice in
-    1) bash basic-software/modules/aur-helper.sh yay ;; # 假设 aur-helper.sh 接受参数 yay
-    2) bash basic-software/modules/aur-helper.sh paru ;; # 假设 aur-helper.sh 接受参数 paru
-    3) bash basic-software/modules/aur-helper.sh octopi ;; # 假设 aur-helper.sh 接受参数 octopi
-    b) basic_software_menu ;;
-    *) echo "无效选择" ;;
-  esac
-}
 
-ssh_install() {
-  echo "安装 SSH"
-  bash basic-software/modules/ssh.sh
+
+install_software() {
+  local software="$1"
+  if confirm_action; then
+    if bash basic-software/modules/"$software".sh; then
+      log "INFO" "打开界面 $software 成功"
+    else
+      log "ERROR" "打开界面 $software 失败"
+    fi
+  fi
   basic_software_menu
 }
 
-nano_install() {
-  echo "安装 nano"
-  bash basic-software/modules/nano.sh
-  basic_software_menu
-}
+# 确保日志目录和文件存在
+ensure_log_dir
+ensure_log_file
 
-input_method_install() {
-  echo "安装输入法"
-  bash basic-software/modules/input-method.sh
-  basic_software_menu
-}
-
-firewall_config() {
-  echo "防火墙配置"
-  bash basic-software/modules/firewall.sh
-  basic_software_menu
-}
-
+# 启动基础软件菜单
 basic_software_menu

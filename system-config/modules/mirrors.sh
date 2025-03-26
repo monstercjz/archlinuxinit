@@ -54,7 +54,28 @@ ensure_log_file() {
 log() {
   local level="$1"
   local message="$2"
-  echo "$(date '+%Y-%m-%d %H:%M:%S') - [$level] $message" | sudo tee -a $LOG_FILE
+  local color
+
+  case "$level" in
+    INFO)
+      color=$(tput setaf 2)  # Green
+      ;;
+    WARNING)
+      color=$(tput setaf 3)  # Yellow
+      ;;
+    ERROR)
+      color=$(tput setaf 1)  # Red
+      ;;
+    *)
+      color=$(tput setaf 4)  # Blue
+      ;;
+  esac
+
+  # 终端输出带颜色的日志
+  echo -e "$(date '+%Y-%m-%d %H:%M:%S') - [$level] $message" | sed "s/^/$color/" | sed "s/$/$(tput sgr0)/"
+
+  # 文件中写入纯文本日志
+  echo "$(date '+%Y-%m-%d %H:%M:%S') - [$level] $message" | sudo tee -a $LOG_FILE > /dev/null
 }
 
 run_with_sudo() {
@@ -172,6 +193,20 @@ add_archlinuxcn_mirror_config() {
     if run_with_sudo bash -c 'echo -e "\n[archlinuxcn]\nSigLevel = Optional TrustedOnly\n#清华源\nServer = https://mirrors.tuna.tsinghua.edu.cn/archlinuxcn/\$arch\n#中科大源\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/\$arch\n#阿里源\nServer = https://mirrors.aliyun.com/archlinuxcn/\$arch" >> /etc/pacman.conf'; then
       echo "archlinuxcn 源配置添加完成"
       log "INFO" "archlinuxcn 源配置添加完成"
+    fi
+  fi
+  MIRRORS_MENU
+}
+
+import_archlinuxcn_gpg_key() {
+  echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+  echo -e "${COLOR_BLUE}步骤 1: 导入 archlinuxcn GPG key${COLOR_RESET}"
+  echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+  log "INFO" "开始导入 archlinuxcn GPG key"
+  if confirm_action; then
+    if run_with_sudo pacman -Sy archlinuxcn-keyring; then
+      echo "archlinuxcn GPG key 导入完成"
+      log "INFO" "archlinuxcn GPG key 导入完成"
       echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
       echo -e "${COLOR_BLUE}步骤 2: 刷新 pacman 源${COLOR_RESET}"
       echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
@@ -187,20 +222,6 @@ add_archlinuxcn_mirror_config() {
   MIRRORS_MENU
 }
 
-import_archlinuxcn_gpg_key() {
-  echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-  echo -e "${COLOR_BLUE}步骤 1: 导入 archlinuxcn GPG key${COLOR_RESET}"
-  echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-  log "INFO" "开始导入 archlinuxcn GPG key"
-  if confirm_action; then
-    if run_with_sudo pacman -Sy archlinuxcn-keyring; then
-      echo "archlinuxcn GPG key 导入完成"
-      log "INFO" "archlinuxcn GPG key 导入完成"
-    fi
-  fi
-  MIRRORS_MENU
-}
-
 refresh_gpg_keys() {
   echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
   echo -e "${COLOR_BLUE}步骤 1: 刷新 GPG key${COLOR_RESET}"
@@ -209,29 +230,42 @@ refresh_gpg_keys() {
   if confirm_action; then
     if run_with_sudo pacman-key --refresh-keys; then
       echo "GPG key 刷新完成"
+      echo "密钥会存储在以下目录中/etc/pacman.d/gnupg/"
+      echo "pacman-key --list-keys 查看密钥列表"
       log "INFO" "GPG key 刷新完成"
     fi
   fi
   MIRRORS_MENU
 }
 
+check_flatpak_installed() {
+  if ! command -v flatpak &> /dev/null; then
+    echo -e "${COLOR_RED}flatpak 未安装，请先安装 flatpak。${COLOR_RESET}"
+    log "ERROR" "flatpak 未安装，请先安装 flatpak"
+    return 1
+  fi
+  return 0
+}
+
 add_flathub_repo() {
-  echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-  echo -e "${COLOR_BLUE}步骤 1: 添加 flathub 仓库${COLOR_RESET}"
-  echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-  log "INFO" "开始添加 flathub 仓库"
-  if confirm_action; then
-    if run_with_sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo; then
-      echo "flathub 仓库添加完成"
-      log "INFO" "flathub 仓库添加完成"
-      echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-      echo -e "${COLOR_BLUE}步骤 2: 刷新 flathub 仓库${COLOR_RESET}"
-      echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-      log "INFO" "开始刷新 flathub 仓库"
-      if confirm_action; then
-        if run_with_sudo flatpak update --system flathub; then
-          echo "flathub 仓库刷新完成"
-          log "INFO" "flathub 仓库刷新完成"
+  if check_flatpak_installed; then
+    echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+    echo -e "${COLOR_BLUE}步骤 1: 添加 flathub 仓库${COLOR_RESET}"
+    echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+    log "INFO" "开始添加 flathub 仓库"
+    if confirm_action; then
+      if run_with_sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo; then
+        echo "flathub 仓库添加完成"
+        log "INFO" "flathub 仓库添加完成"
+        echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+        echo -e "${COLOR_BLUE}步骤 2: 刷新 flathub 仓库${COLOR_RESET}"
+        echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+        log "INFO" "开始刷新 flathub 仓库"
+        if confirm_action; then
+          if run_with_sudo flatpak update --system flathub; then
+            echo "flathub 仓库刷新完成"
+            log "INFO" "flathub 仓库刷新完成"
+          fi
         fi
       fi
     fi
