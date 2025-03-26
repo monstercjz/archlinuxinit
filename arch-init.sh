@@ -78,9 +78,17 @@ log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') - [$level] $message" | sudo tee -a $LOG_FILE > /dev/null
 }
 
-confirm_action() {
-  read -p "$(echo -e "${COLOR_GREEN}确认执行此操作? (y/n): ${COLOR_RESET}")" confirm
-  if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+# confirm_action() {
+#   read -p "$(echo -e "${COLOR_GREEN}确认执行此操作? (y/n): ${COLOR_RESET}")" confirm
+#   if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+#     echo -e "${COLOR_RED}操作已取消${COLOR_RESET}"
+#     log "INFO" "操作已取消"
+#     return 1
+#   fi
+# }
+confirm_actions() {
+  read -p "$(echo -e "${COLOR_RED}确认执行此操作? (y/n)【除非输入N或者n,其他都默认同意】: ${COLOR_RESET}")" confirm
+  if [[ "$confirm" == "n" || "$confirm" == "N" ]]; then
     echo -e "${COLOR_RED}操作已取消${COLOR_RESET}"
     log "INFO" "操作已取消"
     return 1
@@ -89,77 +97,87 @@ confirm_action() {
 
 main_menu() {
   echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-  echo -e "${COLOR_BLUE}主菜单${COLOR_RESET}"
+  echo -e "${COLOR_BLUE}ARCHLINUX-INIT--主菜单${COLOR_RESET}"
   echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}1. 系统配置${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}2. 基础软件${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}3. 常用软件${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}4. ZSH 管理${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}q. 退出${COLOR_RESET}"
-  read -p "请选择菜单: " choice
+  echo -e "${COLOR_YELLOW}1. 系统基础设置${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}2. 基础软件安装${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}3. 常用软件安装${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}4. SHELL-ZSH 美化${COLOR_RESET}"
+  echo -e "${COLOR_BLUE}9. 清屏${COLOR_RESET}"
+  echo -e "${COLOR_RED}0. 退出${COLOR_RESET}"
+  read -p "请选择菜单 (输入：0/1/2/3/4/9 中任一): " choice
   case $choice in
     1) system_config_menu ;;
     2) basic_software_menu ;;
     3) common_software_menu ;;
     4) zsh_manager_menu ;;
-    q) exit 0 ;;
-    *) echo "无效选择" ;;
+    9) clear_screen ;;
+    0) exit 0 ;;
+    *) wait_right_choice ;;
   esac
 }
-
+clear_screen() {
+  clear
+  main_menu
+}
+wait_right_choice() {
+  clear
+  echo -e "${COLOR_RED}无效选择，返回当前菜单继续等待选择${COLOR_RESET}"
+  main_menu
+}
 system_config_menu() {
-  echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-  echo -e "${COLOR_BLUE}系统配置菜单${COLOR_RESET}"
-  echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-  if confirm_action; then
+  # echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+  echo -e "${COLOR_GREEN}<<<<<<<即将打开系统基础配置菜单>>>>>>${COLOR_RESET}"
+  # echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+   if confirm_actions; then
     if bash system-config/system-config.sh; then
-      log "INFO" "系统配置菜单执行成功"
+      log "INFO" "系统基础配置完毕，成功返回主菜单"
     else
-      log "ERROR" "系统配置菜单执行失败"
+      log "ERROR" "打开系统基础配置菜单失败"
     fi
-  fi
+   fi
   main_menu
 }
 
 basic_software_menu() {
-  echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-  echo -e "${COLOR_BLUE}基础软件菜单${COLOR_RESET}"
-  echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-  if confirm_action; then
+  # echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+  echo -e "${COLOR_GREEN}<<<<<<<即将打开基础软件安装菜单>>>>>>${COLOR_RESET}"
+  # echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+   if confirm_actions; then
     if bash basic-software/basic-software.sh; then
-      log "INFO" "基础软件菜单执行成功"
+      log "INFO" "基础软件安装完毕，成功返回主菜单"
     else
-      log "ERROR" "基础软件菜单执行失败"
+      log "ERROR" "打开基础软件安装菜单失败"
     fi
-  fi
+   fi
   main_menu
 }
 
 common_software_menu() {
-  echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-  echo -e "${COLOR_BLUE}常用软件菜单${COLOR_RESET}"
-  echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-  if confirm_action; then
+  # echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+  echo -e "${COLOR_GREEN}<<<<<<<即将打开常用软件安装菜单>>>>>>${COLOR_RESET}"
+  # echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+   if confirm_actions; then
     if bash common-software/common-software.sh; then
-      log "INFO" "常用软件菜单执行成功"
+      log "INFO" "常用软件安装完毕，成功返回主菜单"
     else
-      log "ERROR" "常用软件菜单执行失败"
+      log "ERROR" "打开常用软件安装菜单失败"
     fi
-  fi
+   fi
   main_menu
 }
 
 zsh_manager_menu() {
-  echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-  echo -e "${COLOR_BLUE}ZSH 管理菜单${COLOR_RESET}"
-  echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-  if confirm_action; then
+  # echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+  echo -e "${COLOR_GREEN}<<<<<<<即将打开 SHELL-ZSH 美化配置菜单>>>>>>${COLOR_RESET}"
+  # echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+   if confirm_actions; then
     if bash zsh-manager/zsh-manager.sh; then
-      log "INFO" "ZSH 管理菜单执行成功"
+      log "INFO" "SHELL-ZSH 美化配置完毕，成功返回主菜单"
     else
-      log "ERROR" "ZSH 管理菜单执行失败"
+      log "ERROR" "打开 SHELL-ZSH 美化配置菜单失败"
     fi
-  fi
+   fi
   main_menu
 }
 

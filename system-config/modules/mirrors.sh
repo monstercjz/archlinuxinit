@@ -105,7 +105,7 @@ MIRRORS_MENU() {
   echo -e "${COLOR_YELLOW}3. 导入 archlinuxcn GPG key${COLOR_RESET}"
   echo -e "${COLOR_YELLOW}4. 刷新 GPG key${COLOR_RESET}"
   echo -e "${COLOR_YELLOW}5. 添加 flathub 仓库${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}0. 返回上一级菜单${COLOR_RESET}"
+  echo -e "${COLOR_RED}0. 返回上一级菜单${COLOR_RESET}"
   read -p "请选择菜单: " choice
   case $choice in
     1) change_to_official_mirrors ;;
@@ -114,8 +114,12 @@ MIRRORS_MENU() {
     4) refresh_gpg_keys ;;
     5) add_flathub_repo ;;
     0) exit 0 ;; # 返回 system_config_menu，由 system-config.sh 处理
-    *) echo "无效选择" ;;
+    *) wait_right_choice ;;
   esac
+}
+wait_right_choice() {
+  echo -e "${COLOR_RED}无效选择，返回当前菜单继续等待选择${COLOR_RESET}"
+  MIRRORS_MENU
 }
 
 change_to_official_mirrors() {

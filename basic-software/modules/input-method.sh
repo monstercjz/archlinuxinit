@@ -101,13 +101,17 @@ INPUT_METHOD_INSTALL() {
   echo -e "${COLOR_BLUE}输入法安装菜单${COLOR_RESET}"
   echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
   echo -e "${COLOR_YELLOW}1. 安装输入法${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}b. 返回上一级菜单${COLOR_RESET}"
+  echo -e "${COLOR_RED}0. 返回上一级菜单${COLOR_RESET}"
   read -p "请选择菜单: " choice
   case $choice in
     1) install_input_method_package ;;
-    b) exit 0 ;; # 返回 basic_software_menu，由 basic-software.sh 处理
-    *) echo "无效选择" ;;
+    0) exit 0 ;; # 返回 basic_software_menu，由 basic-software.sh 处理
+    *) wait_right_choice ;;
   esac
+}
+wait_right_choice() {
+  echo -e "${COLOR_RED}无效选择，返回当前菜单继续等待选择${COLOR_RESET}"
+  INPUT_METHOD_INSTALL
 }
 
 install_input_method_package() {

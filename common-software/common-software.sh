@@ -11,7 +11,7 @@ COLOR_RESET="\e[0m"
 
 # 日志变量
 LOG_DIR="/var/log/arch-init"
-LOG_FILE="$LOG_DIR/common_software.log"
+LOG_FILE="$LOG_DIR/arch-init.log"
 
 # 确保日志目录存在
 ensure_log_dir() {
@@ -79,7 +79,7 @@ log() {
 }
 
 confirm_action() {
-  read -p "$(echo -e "${COLOR_GREEN}确认执行此操作? (y/n): ${COLOR_RESET}")" confirm
+  read -p "$(echo -e "${COLOR_RED}确认执行此操作? (y/n): ${COLOR_RESET}")" confirm
   if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
     echo -e "${COLOR_RED}操作已取消${COLOR_RESET}"
     log "INFO" "操作已取消"
@@ -93,14 +93,24 @@ common_software_menu() {
   echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
   echo -e "${COLOR_YELLOW}1. 必备软件${COLOR_RESET}"
   echo -e "${COLOR_YELLOW}2. 其他软件${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}b. 返回主菜单${COLOR_RESET}"
+  echo -e "${COLOR_BLUE}9. 清屏${COLOR_RESET}"
+  echo -e "${COLOR_RED}0. 返回主菜单${COLOR_RESET}"
   read -p "请选择菜单: " choice
   case $choice in
     1) install_software essential ;;
     2) other_software_menu ;;
-    b) exit 0  ;;
-    *) echo "无效选择" ;;
+    9) clear_screen ;;
+    0) exit 0 ;; # 返回主菜单
+    *) wait_right_choice ;;
   esac
+}
+clear_screen() {
+  clear
+  common_software_menu
+}
+wait_right_choice() {
+  echo -e "${COLOR_RED}无效选择，返回当前菜单继续等待选择${COLOR_RESET}"
+  common_software_menu
 }
 
 
@@ -109,7 +119,7 @@ install_software() {
   local software="$1"
   if confirm_action; then
     if bash common-software/modules/"$software".sh; then
-      log "INFO" "打开界面 $software 成功"
+      log "INFO" "已经结束 $software 相关动作，返回常用软件安装菜单成功"
     else
       log "ERROR" "打开界面 $software 失败"
     fi

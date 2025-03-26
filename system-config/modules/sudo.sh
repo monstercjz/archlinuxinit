@@ -101,13 +101,17 @@ SUDO_CONFIG() {
   echo -e "${COLOR_BLUE}sudo 权限强化菜单${COLOR_RESET}"
   echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
   echo -e "${COLOR_YELLOW}1. 强化 sudo 权限 (免密)${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}b. 返回上一级菜单${COLOR_RESET}"
+  echo -e "${COLOR_RED}0. 返回上一级菜单${COLOR_RESET}"
   read -p "请选择菜单: " choice
   case $choice in
     1) enable_sudo_nopasswd ;;
-    b) exit 0 ;; # 返回 system_config_menu，由 system-config.sh 处理
-    *) echo "无效选择" ;;
+    0) exit 0 ;; # 返回 system_config_menu，由 system-config.sh 处理
+    *) wait_right_choice ;;
   esac
+}
+wait_right_choice() {
+  echo -e "${COLOR_RED}无效选择，返回当前菜单继续等待选择${COLOR_RESET}"
+  SUDO_CONFIG
 }
 
 enable_sudo_nopasswd() {

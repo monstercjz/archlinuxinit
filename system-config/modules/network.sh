@@ -366,16 +366,20 @@ NETWORK_CONFIG() {
   echo -e "${COLOR_YELLOW}2. 设置 IP 地址${COLOR_RESET}"
   echo -e "${COLOR_YELLOW}3. 修改 DNS 服务器${COLOR_RESET}"
   echo -e "${COLOR_YELLOW}4. 修改网关${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}b. 返回上一级菜单${COLOR_RESET}"
+  echo -e "${COLOR_RED}0. 返回上一级菜单${COLOR_RESET}"
   read -p "请选择菜单: " choice
   case $choice in
     1) show_current_ip ;;
     2) set_ip_address ;;
     3) modify_dns ;;
     4) modify_gateway ;;
-    b) exit 0 ;; # 返回 system_config_menu，由 system-config.sh 处理
-    *) echo "无效选择" ;;
+    0) exit 0 ;; # 返回 system_config_menu，由 system-config.sh 处理
+    *) wait_right_choice ;;
   esac
+}
+wait_right_choice() {
+  echo -e "${COLOR_RED}无效选择，返回当前菜单继续等待选择${COLOR_RESET}"
+  NETWORK_CONFIG
 }
 
 # 清理函数

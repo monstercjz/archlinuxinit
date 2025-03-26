@@ -103,15 +103,19 @@ NANO_INSTALL() {
   echo -e "${COLOR_YELLOW}1. 安装/重新安装 nano${COLOR_RESET}"
   echo -e "${COLOR_YELLOW}2. 设置 nano 为默认编辑器${COLOR_RESET}"
   echo -e "${COLOR_YELLOW}3. 配置 nano 支持语法高亮、显示行号和自动缩进${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}b. 返回上一级菜单${COLOR_RESET}"
+  echo -e "${COLOR_RED}0. 返回上一级菜单${COLOR_RESET}"
   read -p "请选择菜单: " choice
   case $choice in
     1) install_nano_editor ;;
     2) set_default_editor ;;
     3) configure_nano ;;
-    b) exit 0 ;; # 返回 basic_software_menu，由 basic-software.sh 处理
-    *) echo "无效选择" ;;
+    0) exit 0 ;; # 返回 basic_software_menu，由 basic-software.sh 处理
+    *) wait_right_choice ;;
   esac
+}
+wait_right_choice() {
+  echo -e "${COLOR_RED}无效选择，返回当前菜单继续等待选择${COLOR_RESET}"
+  NANO_INSTALL
 }
 
 install_nano_editor() {

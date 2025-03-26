@@ -101,13 +101,17 @@ PERMISSIONS_CONFIG() {
   echo -e "${COLOR_BLUE}设置窗口权限菜单${COLOR_RESET}"
   echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
   echo -e "${COLOR_YELLOW}1. 允许普通用户访问窗口${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}b. 返回上一级菜单${COLOR_RESET}"
+  echo -e "${COLOR_RED}0. 返回上一级菜单${COLOR_RESET}"
   read -p "请选择菜单: " choice
   case $choice in
     1) allow_user_access_xserver ;;
-    b) exit 0 ;; # 返回 system_config_menu，由 system-config.sh 处理
-    *) echo "无效选择" ;;
+    0) exit 0 ;; # 返回 system_config_menu，由 system-config.sh 处理
+    *) wait_right_choice ;;
   esac
+}
+wait_right_choice() {
+  echo -e "${COLOR_RED}无效选择，返回当前菜单继续等待选择${COLOR_RESET}"
+  PERMISSIONS_CONFIG
 }
 
 allow_user_access_xserver() {
