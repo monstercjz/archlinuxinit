@@ -1,94 +1,29 @@
 #!/bin/bash
-# ==========================
-# 脚本名称: package_stats2.0.sh
-# 描述: 此脚本用于分析Arch Linux系统中手动安装的软件包，并提供详细的统计信息和报告。
-# 功能:
-#   1. 获取系统初始安装日期。
-#   2. 获取用户首次执行命令的时间。
-#   3. 统计手动安装的软件包列表，包括安装日期、软件包名称、大小和仓库来源。
-#   4. 提供排序选项，按安装日期、软件包大小或软件包名称排序。
-#   5. 将统计结果保存到文件，并生成一个仅包含软件包名称的列表文件，便于一键安装。
+# ==============================================================================
+# 脚本名称: package_stats1.0.sh
+# 描述:   该脚本用于收集系统中手动安装的软件包信息，并提供详细的统计信息和报告。
+#         它将根据用户选择的排序方式（按安装日期、大小或名称）对软件包进行排序，
+#         并将结果保存到指定目录中。此外，它还会生成一个仅包含软件包名称的列表文件，
+#         方便在新系统上一键安装所有软件包。
+# 作者:   [您的名字]
+# 版本:   1.0
+# 日期:   [脚本创建或最后修改日期]
 # 使用方法:
-#   1. 直接运行脚本，根据提示选择排序方式。
-#   2. 统计结果将保存到 save_dir="$HOME/arch-linux-init/info-logs" 目录。
-#   3. 可以使用生成的软件包名称列表文件在新系统上一键安装所有软件包。
-# 说明：1. 通过 journalctl、bash 历史记录和 分析第一条pacman -S 等方式获取用户首次执行命令的时间。这个时间作为参考，用于过滤出系统初始安装日期之后安装的软件包。
-#    2. 通过分析 pacman -Qi 获取包的大小
-#    3. 查找每个包在日志里第一次出现的时间，然后将时间和上面的参考时间作为对比。
-#    4. 这也是和1.0版本的区别。
-#    5. 为什么不用pacman -Qi里的安装日期，更新软件，会修改这个安装日期
-# 示例:
-#   sudo pacman -S --needed - < $manual_list_file
-# 作者: [您的名字]
-# 版本: 2.0
-# 日期: 2023-10-01
-# ==========================
+#         1. 直接运行脚本: ./package_stats.sh
+#         2. 脚本将提示用户选择排序方式，并输出统计结果。
+#         3. 统计结果和软件包名称列表将保存到 save_dir="$HOME/arch-linux-init/info-logs" 目录。
+#         4. 可以使用生成的软件包名称列表在新系统上一键安装所有软件包:
+#            sudo pacman -S --needed - < $manual_list_file
+# 依赖:   bash, pacman, journalctl, bc
+# 注意:   部分功能可能需要root权限。
+# 特别说明： 本脚步获取的实际为系统安装的实际，pacmaninstall.log里面的时间，在系统安装期间的时间显示的非本地时间
+# 并且获取的系统安装时间，也并非系统用户手动安装的最早时间
+# 通过pacman -Qe获取的软件包，然后去日志里对比安装时间，获取手动安装的软件包
+# ==============================================================================
 # 颜色定义
 RED='\033[0;31m'; GREEN='\033[0;32m'
 YELLOW='\033[0;33m'; BLUE='\033[0;34m'
 CYAN='\033[0;36m'; NC='\033[0m'
-
-# 获取用户执行的第一条命令时间
-get_first_command_time() {
-    echo -e "${YELLOW}正在获取用户第一次执行命令的时间...${NC}" >&2
-    
-    # 方法一：尝试从journalctl日志中获取最早的用户命令记录
-    if command -v journalctl &> /dev/null; then
-        echo -e "${BLUE}尝试从journalctl日志获取最早的用户命令记录...${NC}" >&2
-        # 获取最早的用户会话记录
-        earliest_session=$(journalctl _UID=1000 --output=short-iso --reverse | tail -n 1)
-        if [ -n "$earliest_session" ]; then
-            # 提取时间戳并转换格式，处理ISO 8601格式
-            if [[ "$earliest_session" =~ ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\+[0-9]{2}:[0-9]{2}) ]]; then
-                # 使用bash正则表达式捕获组提取日期
-                session_date="${BASH_REMATCH[1]}"
-                # 转换为标准格式 YYYY-MM-DD HH:MM
-                session_date=$(date -d "$session_date" "+%Y-%m-%d %H:%M" 2>/dev/null)
-                if [ -n "$session_date" ]; then
-                    echo -e "${GREEN}成功获取用户首次活动时间: $session_date (来源: journalctl用户会话记录)${NC}" >&2
-                    echo "$session_date"
-                    return 0
-                fi
-            fi
-        fi
-    fi
-    # 方法二：从pacmaninstall.log获取第一条pacman -S命令时间
- if [ -f "/var/log/pacman.log" ]; then
-        echo -e "${BLUE}尝试从pacman.log获取第一条pacman -S命令时间...${NC}" >&2
-        # 获取第一条pacman -S命令的时间
-        first_install=$(grep -E "\[PACMAN\] Running 'pacman -S" /var/log/pacman.log | head -n 1)
-        if [ -n "$first_install" ]; then
-            # 尝试匹配ISO 8601格式 [YYYY-MM-DDThh:mm:ss+0800]
-            if [[ "$first_install" =~ \[([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\+[0-9]{4})\] ]]; then
-                # 使用bash正则表达式捕获组提取日期
-                install_time="${BASH_REMATCH[1]}"
-                # 转换为标准格式 YYYY-MM-DD HH:MM
-                install_time=$(date -d "$install_time" "+%Y-%m-%d %H:%M" 2>/dev/null)
-                if [ -n "$install_time" ]; then
-                    echo -e "${GREEN}成功获取用户首次安装软件时间: $install_time (来源: pacman.log第一条安装命令)${NC}" >&2
-                    echo "$install_time"
-                    return 0
-                fi
-            fi
-        fi
-    fi
-    # 方法三：尝试从bash历史记录获取最早命令时间
-    if [ -f "$HOME/.bash_history" ]; then
-        echo -e "${BLUE}尝试从bash历史记录获取最早命令时间...${NC}" >&2
-        # 获取历史记录文件的创建时间
-        history_date=$(stat -c %y "$HOME/.bash_history" | cut -d' ' -f1,2)
-        if [ -n "$history_date" ]; then
-            echo -e "${GREEN}成功获取用户首次活动时间: $history_date (来源: bash历史记录创建时间)${NC}" >&2
-            echo "$history_date"
-            return 0
-        fi
-    fi
-    # 如果都无法获取，则调用get_install_date获取系统安装时间
-    echo -e "${YELLOW}无法获取用户首次活动时间，使用系统安装时间作为参考...${NC}" >&2
-    install_date=$(get_install_date)
-    echo "$install_date"
-    return 1
-}
 
 # 获取系统初始安装日期
 get_install_date() {
@@ -215,29 +150,23 @@ get_manually_installed_packages() {
             if [[ "$install_log" =~ \[([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{4})\] ]]; then
                 # 使用bash正则表达式捕获组提取日期
                 pkg_date="${BASH_REMATCH[1]}"
-                # 转换为标准格式 YYYY-MM-DD HH:MM:SS
-                pkg_date=$(date -d "$pkg_date" "+%Y-%m-%d %H:%M:%S" 2>/dev/null)
             else
                 # 如果没有匹配到新格式，尝试旧格式
                 pkg_date=$(echo "$install_log" | cut -d' ' -f1,2)
             fi
-            pkg_size=$(pacman -Qi "$pkg" | grep "安装后大小" | cut -d':' -f2 | tr -d ' ')
+            pkg_size=$(pacman -Qi "$pkg" | grep "Installed Size" | cut -d':' -f2 | tr -d ' ')
             
             # 比较日期，只保留系统初始安装日期之后的包
             # 处理不同格式的日期比较
             install_date_for_compare="$install_date"
             pkg_date_for_compare="$pkg_date"
             
-            # 如果是中文格式的日期，转换为date命令可以理解的格式
-            if [[ "$pkg_date" =~ ([0-9]{4})年([0-9]{2})月([0-9]{2})日[[:space:]]星期[一二三四五六日][[:space:]]([0-9]{2})时([0-9]{2})分([0-9]{2})秒 ]]; then
-                # 提取日期部分和时间部分
-                year="${BASH_REMATCH[1]}"
-                month="${BASH_REMATCH[2]}"
-                day="${BASH_REMATCH[3]}"
-                hour="${BASH_REMATCH[4]}"
-                minute="${BASH_REMATCH[5]}"
-                second="${BASH_REMATCH[6]}"
-                pkg_date_for_compare="$year-$month-$day $hour:$minute:$second"
+            # 如果是ISO 8601格式，转换为date命令可以理解的格式
+            if [[ "$pkg_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2} ]]; then
+                # 提取日期部分和时间部分，去除时区信息
+                date_part=$(echo "$pkg_date" | cut -dT -f1)
+                time_part=$(echo "$pkg_date" | cut -dT -f2 | cut -d+ -f1 | cut -d- -f1)
+                pkg_date_for_compare="$date_part $time_part"
             fi
             
             # 转换为Unix时间戳进行比较
@@ -294,7 +223,7 @@ get_manually_installed_packages() {
 # 显示软件包统计信息
 show_package_stats() {
     echo -e "${CYAN}========== 开始软件包统计 ===========${NC}"
-    echo -e "${BLUE}此工具将分析您系统中手动安装的软件包和系统环境信息，并提供详细统计信息${NC}"
+    echo -e "${BLUE}此工具将分析您系统中手动安装的软件包，并提供详细统计信息${NC}"
     
     # 显示排序选项
     echo -e "${CYAN}========== 软件包统计 ===========${NC}"
@@ -316,9 +245,9 @@ show_package_stats() {
     
     read -p "请输入选项: " choice
     
-    # 获取用户首次活动时间或系统初始安装日期
-    echo -e "${BLUE}正在获取用户首次活动时间或系统初始安装日期...${NC}"
-    install_date=$(get_first_command_time)
+    # 获取系统初始安装日期
+    echo -e "${BLUE}正在获取系统初始安装日期...${NC}"
+    install_date=$(get_install_date)
     
     # 根据选择的排序方式获取软件包列表
     echo -e "${BLUE}根据您的选择获取软件包列表...${NC}"
