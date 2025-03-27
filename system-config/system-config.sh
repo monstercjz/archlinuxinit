@@ -95,6 +95,8 @@ system_config_menu() {
   echo -e "${COLOR_YELLOW}2. 设置窗口权限${COLOR_RESET}"
   echo -e "${COLOR_YELLOW}3. sudo 权限强化(免密)${COLOR_RESET}"
   echo -e "${COLOR_YELLOW}4. 网络地址设定${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}5. 获取用户手动安装软件包信息${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}6. 系统信息收集${COLOR_RESET}"
   echo -e "${COLOR_BLUE}9. 清屏${COLOR_RESET}"
   echo -e "${COLOR_RED}0. 返回主菜单${COLOR_RESET}"
   read -p "请选择菜单: " choice
@@ -103,6 +105,8 @@ system_config_menu() {
     2) install_software permissions ;;
     3) install_software sudo ;;
     4) install_software network ;;
+    5) install_software package_stats ;;
+    6) install_software archlinux_system_analysis_2.0 ;;
     9) clear_screen ;;
     0) exit 0 ;; # 返回主菜单
     *) wait_right_choice ;;

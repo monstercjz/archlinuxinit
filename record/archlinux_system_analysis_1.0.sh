@@ -1,5 +1,19 @@
 #!/bin/bash
-
+# ==============================================================================
+# 脚本名称: archlinux_system_analysis_1.0.sh
+# 描述:   该脚本用于收集详细的系统环境信息，包括系统基本信息、版本信息、桌面环境信息、
+#         硬件信息、磁盘信息、系统运行时间、语言环境。
+#         它将生成详细的统计信息并保存到指定目录中。
+# 作者:   [您的名字]
+# 版本:   2.0
+# 日期:   [脚本创建或最后修改日期]
+# 使用方法:
+#         1. 直接运行脚本: ./archlinux_system_analysis_1.0.sh
+#         2. 脚本将收集系统信息并输出到终端。
+#         3. 收集到的信息将保存到 $HOME/system-info 目录中。
+# 依赖:   bash, pacman, lsb_release, dmidecode, lspci, glxinfo, wmctrl, journalctl, bc, ip, lsblk
+# 注意:   部分功能可能需要root权限。
+# ==============================================================================
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -412,7 +426,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     system_info=$(get_system_info)
     
     # 定义保存目录
-    save_dir="$HOME/system-info"
+    save_dir="$HOME/arch-linux-init/info-logs"
     
     # 创建保存目录，如果不存在
     if [ ! -d "$save_dir" ]; then

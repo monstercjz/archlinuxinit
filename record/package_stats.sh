@@ -1,289 +1,26 @@
 #!/bin/bash
-
+# ==============================================================================
+# 脚本名称: package_stats.sh
+# 描述:   该脚本用于收集系统中手动安装的软件包信息，并提供详细的统计信息和报告。
+#         它将根据用户选择的排序方式（按安装日期、大小或名称）对软件包进行排序，
+#         并将结果保存到指定目录中。此外，它还会生成一个仅包含软件包名称的列表文件，
+#         方便在新系统上一键安装所有软件包。
+# 作者:   [您的名字]
+# 版本:   1.0
+# 日期:   [脚本创建或最后修改日期]
+# 使用方法:
+#         1. 直接运行脚本: ./package_stats.sh
+#         2. 脚本将提示用户选择排序方式，并输出统计结果。
+#         3. 统计结果和软件包名称列表将保存到 $HOME/package-stats 目录。
+#         4. 可以使用生成的软件包名称列表在新系统上一键安装所有软件包:
+#            sudo pacman -S --needed - < $manual_list_file
+# 依赖:   bash, pacman, journalctl, bc
+# 注意:   部分功能可能需要root权限。
+# ==============================================================================
 # 颜色定义
 RED='\033[0;31m'; GREEN='\033[0;32m'
 YELLOW='\033[0;33m'; BLUE='\033[0;34m'
 CYAN='\033[0;36m'; NC='\033[0m'
-
-# 获取系统环境信息
-get_system_info() {
-    echo -e "${YELLOW}正在收集系统环境信息...${NC}" >&2
-    
-    # 创建临时文件
-    temp_system_info=$(mktemp)
-    
-    # 收集系统基本信息
-    echo -e "${BLUE}正在获取系统基本信息...${NC}" >&2
-    echo "========== 系统基本信息 ==========" >> "$temp_system_info"
-    echo "主机名: $(hostname)" >> "$temp_system_info"
-    echo "内核版本: $(uname -r)" >> "$temp_system_info"
-    echo "架构: $(uname -m)" >> "$temp_system_info"
-    echo -e "${GREEN}系统基本信息获取成功${NC}" >&2
-    
-    # 收集系统版本信息
-    echo -e "${BLUE}正在获取系统版本信息...${NC}" >&2
-    version_detected=false
-    
-    if [ -f "/etc/os-release" ]; then
-        echo "发行版信息:" >> "$temp_system_info"
-        source /etc/os-release 2>/dev/null
-        echo "  名称: $NAME" >> "$temp_system_info"
-        
-        # 优先使用VERSION_ID，因为它通常更简洁
-        if [ -n "$VERSION_ID" ]; then
-            echo "  版本: $VERSION_ID" >> "$temp_system_info"
-            version_detected=true
-        # 其次使用VERSION
-        elif [ -n "$VERSION" ]; then
-            echo "  版本: $VERSION" >> "$temp_system_info"
-            version_detected=true
-        fi
-        
-        echo "  ID: $ID" >> "$temp_system_info"
-        [ -n "$BUILD_ID" ] && echo "  构建ID: $BUILD_ID" >> "$temp_system_info"
-        
-        # 如果版本信息仍然为空，尝试其他方法
-        if ! $version_detected; then
-            echo -e "${YELLOW}os-release文件中版本字段为空，尝试其他方法获取系统版本...${NC}" >&2
-            
-            # 检查是否为Arch Linux
-            if [ "$ID" = "arch" ] || [ -f "/etc/arch-release" ]; then
-                echo -e "${BLUE}检测到Arch Linux系统，尝试获取版本信息...${NC}" >&2
-                
-                # 对于Arch Linux，使用pacman获取系统版本
-                if command -v pacman &> /dev/null; then
-                    # 获取pacman版本作为系统版本参考
-                    pacman_version=$(pacman -Q pacman | cut -d' ' -f2)
-                    echo "  版本: Rolling Release (pacman $pacman_version)" >> "$temp_system_info"
-                    echo -e "${GREEN}成功获取Arch Linux版本信息${NC}" >&2
-                    version_detected=true
-                fi
-            fi
-            
-            # 尝试使用lsb_release命令获取系统版本
-            if ! $version_detected && command -v lsb_release &> /dev/null; then
-                echo -e "${BLUE}尝试使用lsb_release命令获取系统版本...${NC}" >&2
-                lsb_version=$(lsb_release -r | cut -f2)
-                if [ -n "$lsb_version" ]; then
-                    echo "  版本(lsb): $lsb_version" >> "$temp_system_info"
-                    echo -e "${GREEN}成功使用lsb_release获取系统版本${NC}" >&2
-                    version_detected=true
-                fi
-            fi
-            
-            # 尝试从/etc/issue文件获取版本信息
-            if ! $version_detected && [ -f "/etc/issue" ]; then
-                echo -e "${BLUE}尝试从/etc/issue文件获取系统版本...${NC}" >&2
-                issue_version=$(head -n 1 /etc/issue | sed 's/\\.*$//' | sed 's/^[^0-9]*\([0-9].*\)/\1/' | tr -d '\n')
-                if [ -n "$issue_version" ]; then
-                    echo "  版本(issue): $issue_version" >> "$temp_system_info"
-                    echo -e "${GREEN}成功从/etc/issue获取系统版本${NC}" >&2
-                    version_detected=true
-                fi
-            fi
-            
-            # 如果仍然无法获取版本信息，添加一个默认值
-            if ! $version_detected; then
-                echo "  版本: 未知" >> "$temp_system_info"
-                echo -e "${YELLOW}无法获取具体版本信息，使用'未知'作为默认值${NC}" >&2
-            fi
-        fi
-        
-        echo -e "${GREEN}系统版本信息获取成功${NC}" >&2
-    else
-        echo "发行版信息: 未知" >> "$temp_system_info"
-        echo -e "${RED}无法获取系统版本信息${NC}" >&2
-    fi
-    
-    # 收集桌面环境信息
-    echo -e "${BLUE}正在获取桌面环境信息...${NC}" >&2
-    echo "" >> "$temp_system_info"
-    echo "桌面环境:" >> "$temp_system_info"
-    
-    # 改进桌面环境检测方法
-    desktop_detected=false
-    
-    # 检查XDG_CURRENT_DESKTOP环境变量
-    if [ -n "$XDG_CURRENT_DESKTOP" ]; then
-        echo "  当前桌面: $XDG_CURRENT_DESKTOP" >> "$temp_system_info"
-        echo -e "${GREEN}桌面环境信息获取成功${NC}" >&2
-        desktop_detected=true
-    fi
-    
-    # 检查DESKTOP_SESSION环境变量
-    if [ -n "$DESKTOP_SESSION" ]; then
-        echo "  桌面会话: $DESKTOP_SESSION" >> "$temp_system_info"
-        echo -e "${GREEN}桌面会话信息获取成功${NC}" >&2
-        desktop_detected=true
-    fi
-    
-    # 尝试通过进程检测常见桌面环境
-    if ! $desktop_detected && command -v ps &> /dev/null; then
-        if ps -e | grep -E 'gnome-session|kwin|xfwm4|i3|sway|openbox|fluxbox|bspwm|dwm' &> /dev/null; then
-            detected_de=$(ps -e | grep -E 'gnome-session|kwin|xfwm4|i3|sway|openbox|fluxbox|bspwm|dwm' | head -n 1 | awk '{print $4}')
-            echo "  检测到桌面环境进程: $detected_de" >> "$temp_system_info"
-            echo -e "${GREEN}通过进程检测到桌面环境${NC}" >&2
-            desktop_detected=true
-        fi
-    fi
-    
-    # 如果仍未检测到桌面环境
-    if ! $desktop_detected; then
-        echo "  未检测到桌面环境" >> "$temp_system_info"
-        echo -e "${YELLOW}未检测到桌面环境${NC}" >&2
-    fi
-    
-    # 收集显示管理器信息
-    echo -e "${BLUE}正在获取显示管理器信息...${NC}" >&2
-    if command -v systemctl &> /dev/null; then
-        if systemctl is-active --quiet display-manager 2>/dev/null; then
-            dm=$(systemctl status display-manager 2>/dev/null | grep 'Loaded:' | cut -d'(' -f2 | cut -d';' -f1)
-            if [ -n "$dm" ]; then
-                echo "  显示管理器: $dm" >> "$temp_system_info"
-                echo -e "${GREEN}显示管理器信息获取成功${NC}" >&2
-            fi
-        else
-            echo "  显示管理器: 未运行" >> "$temp_system_info"
-            echo -e "${YELLOW}未检测到运行中的显示管理器${NC}" >&2
-        fi
-    fi
-    
-    # 收集窗口管理器信息
-    echo -e "${BLUE}正在获取窗口管理器信息...${NC}" >&2
-    if command -v wmctrl &> /dev/null; then
-        wm=$(wmctrl -m 2>/dev/null | grep "Name:" | cut -d: -f2 | tr -d ' ')
-        if [ -n "$wm" ]; then
-            echo "  窗口管理器: $wm" >> "$temp_system_info"
-            echo -e "${GREEN}窗口管理器信息获取成功${NC}" >&2
-        else
-            echo "  窗口管理器: 未检测到" >> "$temp_system_info"
-            echo -e "${YELLOW}未检测到窗口管理器${NC}" >&2
-        fi
-    else
-        echo "  窗口管理器: wmctrl命令不可用" >> "$temp_system_info"
-        echo -e "${YELLOW}wmctrl命令不可用，无法获取窗口管理器信息${NC}" >&2
-    fi
-    
-    # 收集硬件信息
-    echo -e "${BLUE}正在获取硬件信息...${NC}" >&2
-    echo "" >> "$temp_system_info"
-    echo "========== 硬件信息 ==========" >> "$temp_system_info"
-    
-    # 收集CPU信息
-    echo -e "${BLUE}正在获取CPU信息...${NC}" >&2
-    if [ -f "/proc/cpuinfo" ]; then
-        cpu_model=$(grep -m 1 "model name" /proc/cpuinfo | cut -d':' -f2 | sed 's/^[ \t]*//')
-        cpu_cores=$(grep -c "processor" /proc/cpuinfo)
-        echo "CPU: $cpu_model ($cpu_cores 核)" >> "$temp_system_info"
-        echo -e "${GREEN}CPU信息获取成功${NC}" >&2
-    else
-        echo "CPU: 未知" >> "$temp_system_info"
-        echo -e "${RED}无法获取CPU信息${NC}" >&2
-    fi
-    
-    # 收集内存信息
-    echo -e "${BLUE}正在获取内存信息...${NC}" >&2
-    if [ -f "/proc/meminfo" ]; then
-        total_mem=$(grep "MemTotal" /proc/meminfo | awk '{print $2}')
-        # 转换为GB并保留两位小数，使用awk替代bc，因为bc可能不存在
-        total_mem_gb=$(awk -v mem="$total_mem" 'BEGIN {printf "%.2f", mem/1024/1024}')
-        echo "内存: ${total_mem_gb}GB" >> "$temp_system_info"
-        echo -e "${GREEN}内存信息获取成功${NC}" >&2
-    else
-        echo "内存: 未知" >> "$temp_system_info"
-        echo -e "${RED}无法获取内存信息${NC}" >&2
-    fi
-    
-    # 收集显卡信息
-    echo -e "${BLUE}正在获取显卡信息...${NC}" >&2
-    if command -v lspci &> /dev/null; then
-        gpu_info=$(lspci | grep -E 'VGA|3D|Display' | sed 's/^.*: //')
-        if [ -n "$gpu_info" ]; then
-            echo "显卡:" >> "$temp_system_info"
-            lspci | grep -E 'VGA|3D|Display' | sed 's/^/  /' >> "$temp_system_info"
-            echo -e "${GREEN}显卡信息获取成功${NC}" >&2
-        else
-            echo "显卡: 未检测到" >> "$temp_system_info"
-            echo -e "${YELLOW}未检测到显卡信息${NC}" >&2
-        fi
-    else
-        echo "显卡: 未知（lspci命令不可用）" >> "$temp_system_info"
-        echo -e "${RED}无法获取显卡信息（lspci命令不可用）${NC}" >&2
-    fi
-    
-    # 收集磁盘使用情况
-    echo -e "${BLUE}正在获取磁盘使用情况...${NC}" >&2
-    if command -v df &> /dev/null; then
-        echo "" >> "$temp_system_info"
-        echo "磁盘信息:" >> "$temp_system_info"
-        df -h | grep -E "^/dev/|^tmpfs" | sort >> "$temp_system_info"
-        echo -e "${GREEN}磁盘使用情况获取成功${NC}" >&2
-    else
-        echo "磁盘信息: 未知" >> "$temp_system_info"
-        echo -e "${RED}无法获取磁盘使用情况${NC}" >&2
-    fi
-    
-    # 收集系统运行时间
-    echo -e "${BLUE}正在获取系统运行时间...${NC}" >&2
-    if command -v uptime &> /dev/null; then
-        uptime_info=$(uptime -p | sed 's/^up //')
-        echo "系统运行时间: $uptime_info" >> "$temp_system_info"
-        echo -e "${GREEN}系统运行时间获取成功${NC}" >&2
-    else
-        echo "系统运行时间: 未知" >> "$temp_system_info"
-        echo -e "${RED}无法获取系统运行时间${NC}" >&2
-    fi
-    
-    # 收集系统语言环境
-    echo -e "${BLUE}正在获取系统语言环境...${NC}" >&2
-    if [ -n "$LANG" ]; then
-        echo "系统语言环境: $LANG" >> "$temp_system_info"
-        echo -e "${GREEN}系统语言环境获取成功${NC}" >&2
-    else
-        echo "系统语言环境: 未知" >> "$temp_system_info"
-        echo -e "${RED}无法获取系统语言环境${NC}" >&2
-    fi
-    
-    # 收集关键软件版本信息
-    echo -e "${BLUE}正在获取关键软件版本信息...${NC}" >&2
-    echo "" >> "$temp_system_info"
-    echo "========== 关键软件版本 ==========" >> "$temp_system_info"
-    
-    # 检查常见的关键软件包
-    if command -v pacman &> /dev/null; then
-        key_packages=("systemd" "bash" "glibc" "gcc" "mesa" "xorg-server" "wayland" "plasma-desktop" "gnome-shell" "xfce4-session" "i3" "sway")
-        
-        for pkg in "${key_packages[@]}"; do
-            if pacman -Q "$pkg" &> /dev/null; then
-                pkg_version=$(pacman -Q "$pkg" | awk '{print $2}')
-                echo "$pkg: $pkg_version" >> "$temp_system_info"
-            fi
-        done
-        echo -e "${GREEN}关键软件版本信息获取成功${NC}" >&2
-    else
-        echo "无法获取软件包信息（pacman命令不可用）" >> "$temp_system_info"
-        echo -e "${RED}无法获取软件包信息（pacman命令不可用）${NC}" >&2
-    fi
-    
-    # 收集系统服务信息
-    echo -e "${BLUE}正在获取系统服务信息...${NC}" >&2
-    if command -v systemctl &> /dev/null; then
-        echo "" >> "$temp_system_info"
-        echo "========== 系统服务状态 ==========" >> "$temp_system_info"
-        echo "已启用的服务:" >> "$temp_system_info"
-        systemctl list-unit-files --state=enabled --no-pager 2>/dev/null | grep -v "^UNIT" | grep -v "^$" | head -n 20 >> "$temp_system_info"
-        echo "..." >> "$temp_system_info"
-        echo -e "${GREEN}系统服务信息获取成功${NC}" >&2
-    fi
-    
-    # 输出收集到的系统信息
-    cat "$temp_system_info"
-    
-    # 删除临时文件
-    rm -f "$temp_system_info"
-    
-    echo -e "${GREEN}系统环境信息收集完成!${NC}" >&2
-}
 
 # 获取系统初始安装日期
 get_install_date() {
@@ -483,7 +220,7 @@ get_manually_installed_packages() {
 # 显示软件包统计信息
 show_package_stats() {
     echo -e "${CYAN}========== 开始软件包统计 ===========${NC}"
-    echo -e "${BLUE}此工具将分析您系统中手动安装的软件包和系统环境信息，并提供详细统计信息${NC}"
+    echo -e "${BLUE}此工具将分析您系统中手动安装的软件包，并提供详细统计信息${NC}"
     
     # 显示排序选项
     echo -e "${CYAN}========== 软件包统计 ===========${NC}"
@@ -495,7 +232,7 @@ show_package_stats() {
     
     # 创建保存目录
     echo -e "${BLUE}正在准备保存目录...${NC}"
-    save_dir="$HOME/package-stats"
+    save_dir="$HOME/arch-linux-init/info-logs"
     if [ ! -d "$save_dir" ]; then
         echo -e "${YELLOW}创建保存目录: $save_dir${NC}"
         mkdir -p "$save_dir"
@@ -508,10 +245,6 @@ show_package_stats() {
     # 获取系统初始安装日期
     echo -e "${BLUE}正在获取系统初始安装日期...${NC}"
     install_date=$(get_install_date)
-    
-    # 获取系统环境信息
-    echo -e "${BLUE}正在获取系统环境信息...${NC}"
-    system_info=$(get_system_info)
     
     # 根据选择的排序方式获取软件包列表
     echo -e "${BLUE}根据您的选择获取软件包列表...${NC}"
@@ -589,12 +322,6 @@ show_package_stats() {
     # 清理临时文件
     rm -f "$temp_count_file"
     
-    echo -e "\n${CYAN}========== 系统环境信息 ===========${NC}"
-    echo -e "${BLUE}正在显示系统环境信息...${NC}"
-    echo "$system_info" | while IFS= read -r line; do
-        echo -e "${GREEN}$line${NC}"
-    done
-    
     echo -e "\n${CYAN}========== 统计信息 ===========${NC}"
     echo -e "${GREEN}总共手动安装的软件包: $total${NC}"
     echo -e "${GREEN}官方仓库软件包: $official${NC}"
@@ -611,9 +338,6 @@ show_package_stats() {
     {
         echo "========== 软件包统计 ==========="
         echo "系统初始安装日期: $install_date"
-        echo ""
-        echo "========== 系统环境信息 ==========="
-        echo "$system_info"
         echo ""
         echo "========== 手动安装的软件包 ==========="
         echo "日期          | 软件包名称                | 大小      | 仓库"
@@ -668,8 +392,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     show_package_stats
     
     echo -e "\n${CYAN}========== 使用提示 ===========${NC}"
-    echo -e "${BLUE}1. 统计结果已保存到 $HOME/package-stats 目录${NC}"
-    echo -e "${BLUE}2. 软件包名称列表也已保存到 $HOME/package-stats 目录${NC}"
+    echo -e "${BLUE}1. 统计结果已保存到 $HOME/arch-linux-init/info-logs 目录${NC}"
+    echo -e "${BLUE}2. 软件包名称列表也已保存到 $HOME/arch-linux-init/info-logs 目录${NC}"
     echo -e "${BLUE}3. 您可以使用此列表在新系统上一键安装所有软件包:${NC}"
     echo -e "${CYAN}   sudo pacman -S --needed - < $manual_list_file${NC}"
     echo -e "${CYAN}===================================${NC}"
