@@ -17,6 +17,10 @@
 #   - 恢复点功能（在关键步骤创建检查点以便从故障中恢复）
 # 5.2 版本
 #   - 备份进度显示（支持进度条或百分比显示）
+# 5.3 版本
+#   - 并行备份功能（支持多任务同时执行，提高备份速度）
+#   - 新增配置选项：PARALLEL_BACKUP 和 PARALLEL_JOBS
+#   - 支持 GNU Parallel 工具（如已安装）或使用内置的后台进程实现
 #############################################################
 
 # 获取实际用户（处理sudo情况）
@@ -100,6 +104,19 @@ check_dependencies() {
         log "WARN" "未检测到 pv 工具，备份进度显示将使用 rsync 内置的进度功能"
         log "INFO" "提示：安装 pv 工具可获得更好的进度显示体验 (sudo pacman -S pv)"
         USE_PROGRESS_BAR=false
+    fi
+    
+    # 检查并行备份依赖
+    if [ "$PARALLEL_BACKUP" == "true" ]; then
+        # 检查是否安装了GNU Parallel
+        if command -v "parallel" >/dev/null 2>&1; then
+            log "INFO" "检测到 GNU Parallel 工具，将启用并行备份功能"
+            HAS_PARALLEL=true
+        else
+            log "WARN" "未检测到 GNU Parallel 工具，将使用内置的后台进程实现并行备份"
+            log "INFO" "提示：安装 GNU Parallel 工具可获得更好的并行备份体验 (sudo pacman -S parallel)"
+            HAS_PARALLEL=false
+        fi
     fi
     
     # 如果启用了压缩，检查相应的压缩命令
@@ -199,6 +216,14 @@ DIFF_BACKUP=false
 # 是否验证备份 (true/false)
 # 验证备份会检查备份文件的完整性
 VERIFY_BACKUP=false
+
+# 是否启用并行备份 (true/false)
+# 并行备份可以同时执行多个备份任务，提高备份速度
+PARALLEL_BACKUP=false
+
+# 并行备份的最大任务数
+# 建议设置为CPU核心数或略低于核心数
+PARALLEL_JOBS=4
 
 # 日志保留天数
 LOG_RETENTION_DAYS=30
@@ -1089,6 +1114,112 @@ check_recovery_point() {
     return 0
 }
 
+# 并行执行备份任务
+run_parallel_backup() {
+    local tasks=($@)
+    local results=()  
+    local pids=()  # 存储后台进程的PID
+    local task_count=${#tasks[@]}
+    local completed=0
+    local failed=0
+    
+    log "INFO" "开始并行备份，共 $task_count 个任务，最大并行数 $PARALLEL_JOBS"
+    
+    # 使用GNU Parallel执行任务
+    if [ "$HAS_PARALLEL" == "true" ]; then
+        log "INFO" "使用 GNU Parallel 执行并行备份"
+        
+        # 创建临时任务文件
+        local task_file="${BACKUP_ROOT}/parallel_tasks_${TIMESTAMP}.txt"
+        for task in "${tasks[@]}"; do
+            echo "$task" >> "$task_file"
+        done
+        
+        # 使用GNU Parallel执行任务
+        parallel --jobs "$PARALLEL_JOBS" --joblog "${BACKUP_ROOT}/parallel_log_${TIMESTAMP}.txt" < "$task_file"
+        
+        # 检查结果
+        local parallel_exit=$?
+        if [ $parallel_exit -eq 0 ]; then
+            log "INFO" "并行备份任务全部完成"
+        else
+            log "WARN" "并行备份任务部分失败，退出码: $parallel_exit"
+        fi
+        
+        # 清理临时文件
+        rm -f "$task_file"
+        
+        return $parallel_exit
+    else
+        # 使用bash后台进程实现并行
+        log "INFO" "使用bash后台进程实现并行备份"
+        
+        # 创建临时目录存储任务结果
+        local temp_dir="${BACKUP_ROOT}/parallel_results_${TIMESTAMP}"
+        mkdir -p "$temp_dir"
+        
+        # 启动任务，控制并行数量
+        local running=0
+        local i=0
+        
+        while [ $i -lt $task_count ]; do
+            # 检查当前运行的任务数量
+            if [ $running -lt $PARALLEL_JOBS ]; then
+                local task=${tasks[$i]}
+                local result_file="${temp_dir}/result_${i}.txt"
+                
+                # 在后台执行任务并将结果保存到文件
+                eval "$task; echo \$? > '$result_file'" &
+                pids+=($!)
+                
+                log "INFO" "启动任务 #$((i+1)): ${task:0:50}... (PID: ${pids[-1]})"
+                
+                running=$((running + 1))
+                i=$((i + 1))
+            else
+                # 等待任意一个任务完成
+                wait -n 2>/dev/null || true
+                running=$((running - 1))
+            fi
+        done
+        
+        # 等待所有任务完成
+        log "INFO" "等待所有并行任务完成..."
+        wait
+        
+        # 收集结果
+        for ((i=0; i<$task_count; i++)); do
+            local result_file="${temp_dir}/result_${i}.txt"
+            if [ -f "$result_file" ]; then
+                local exit_code=$(cat "$result_file")
+                results+=($exit_code)
+                
+                if [ "$exit_code" -eq 0 ]; then
+                    completed=$((completed + 1))
+                else
+                    failed=$((failed + 1))
+                    log "WARN" "任务 #$((i+1)) 失败，退出码: $exit_code"
+                fi
+            else
+                log "ERROR" "任务 #$((i+1)) 的结果文件不存在"
+                failed=$((failed + 1))
+            fi
+        done
+        
+        # 清理临时文件
+        rm -rf "$temp_dir"
+        
+        # 报告结果
+        log "INFO" "并行备份完成: $completed 成功, $failed 失败"
+        
+        if [ $failed -eq 0 ]; then
+            return 0
+        else
+            return 1
+        fi
+    fi
+}
+
 # 主函数
 main() {
     log "INFO" "开始 Arch Linux 备份 (${TIMESTAMP})"
@@ -1140,39 +1271,84 @@ main() {
     # 执行备份，根据跳过标志和配置决定是否执行
     local backup_errors=0
     
-    # 备份系统配置
-    if [ "$SKIP_SYSTEM_CONFIG" != "true" ] && [ "$BACKUP_SYSTEM_CONFIG" == "true" ]; then
-        backup_system_config || backup_errors=$((backup_errors + 1))
+    # 判断是否使用并行备份
+    if [ "$PARALLEL_BACKUP" == "true" ]; then
+        log "INFO" "启用并行备份模式，最大并行任务数: $PARALLEL_JOBS"
+        
+        # 准备并行任务列表
+        local parallel_tasks=()
+        
+        # 添加备份任务到列表
+        if [ "$SKIP_SYSTEM_CONFIG" != "true" ] && [ "$BACKUP_SYSTEM_CONFIG" == "true" ]; then
+            parallel_tasks+=("backup_system_config")
+        fi
+        
+        if [ "$SKIP_USER_CONFIG" != "true" ] && [ "$BACKUP_USER_CONFIG" == "true" ]; then
+            parallel_tasks+=("backup_user_config")
+        fi
+        
+        if [ "$SKIP_CUSTOM_PATHS" != "true" ] && [ "$BACKUP_CUSTOM_PATHS" == "true" ]; then
+            parallel_tasks+=("backup_custom_paths")
+        fi
+        
+        if [ "$SKIP_PACKAGES" != "true" ] && [ "$BACKUP_PACKAGES" == "true" ]; then
+            parallel_tasks+=("backup_packages")
+        fi
+        
+        if [ "$SKIP_LOGS" != "true" ] && [ "$BACKUP_LOGS" == "true" ]; then
+            parallel_tasks+=("backup_logs")
+        fi
+        
+        # 执行并行备份
+        if [ ${#parallel_tasks[@]} -gt 0 ]; then
+            log "INFO" "开始执行 ${#parallel_tasks[@]} 个并行备份任务"
+            if ! run_parallel_backup "${parallel_tasks[@]}"; then
+                backup_errors=$((backup_errors + 1))
+                log "WARN" "并行备份任务部分失败，请检查日志获取详细信息"
+            else
+                log "INFO" "并行备份任务全部成功完成"
+            fi
+        else
+            log "INFO" "没有需要执行的备份任务"
+        fi
     else
-        log "INFO" "跳过系统配置备份 (已完成或已禁用)"
-    fi
-    
-    # 备份用户配置
-    if [ "$SKIP_USER_CONFIG" != "true" ] && [ "$BACKUP_USER_CONFIG" == "true" ]; then
-        backup_user_config || backup_errors=$((backup_errors + 1))
-    else
-        log "INFO" "跳过用户配置备份 (已完成或已禁用)"
-    fi
-    
-    # 备份自定义路径
-    if [ "$SKIP_CUSTOM_PATHS" != "true" ] && [ "$BACKUP_CUSTOM_PATHS" == "true" ]; then
-        backup_custom_paths || backup_errors=$((backup_errors + 1))
-    else
-        log "INFO" "跳过自定义路径备份 (已完成或已禁用)"
-    fi
-    
-    # 备份软件包列表
-    if [ "$SKIP_PACKAGES" != "true" ] && [ "$BACKUP_PACKAGES" == "true" ]; then
-        backup_packages || backup_errors=$((backup_errors + 1))
-    else
-        log "INFO" "跳过软件包列表备份 (已完成或已禁用)"
-    fi
-    
-    # 备份系统日志
-    if [ "$SKIP_LOGS" != "true" ] && [ "$BACKUP_LOGS" == "true" ]; then
-        backup_logs || backup_errors=$((backup_errors + 1))
-    else
-        log "INFO" "跳过系统日志备份 (已完成或已禁用)"
+        # 顺序执行备份任务
+        log "INFO" "使用顺序备份模式"
+        
+        # 备份系统配置
+        if [ "$SKIP_SYSTEM_CONFIG" != "true" ] && [ "$BACKUP_SYSTEM_CONFIG" == "true" ]; then
+            backup_system_config || backup_errors=$((backup_errors + 1))
+        else
+            log "INFO" "跳过系统配置备份 (已完成或已禁用)"
+        fi
+        
+        # 备份用户配置
+        if [ "$SKIP_USER_CONFIG" != "true" ] && [ "$BACKUP_USER_CONFIG" == "true" ]; then
+            backup_user_config || backup_errors=$((backup_errors + 1))
+        else
+            log "INFO" "跳过用户配置备份 (已完成或已禁用)"
+        fi
+        
+        # 备份自定义路径
+        if [ "$SKIP_CUSTOM_PATHS" != "true" ] && [ "$BACKUP_CUSTOM_PATHS" == "true" ]; then
+            backup_custom_paths || backup_errors=$((backup_errors + 1))
+        else
+            log "INFO" "跳过自定义路径备份 (已完成或已禁用)"
+        fi
+        
+        # 备份软件包列表
+        if [ "$SKIP_PACKAGES" != "true" ] && [ "$BACKUP_PACKAGES" == "true" ]; then
+            backup_packages || backup_errors=$((backup_errors + 1))
+        else
+            log "INFO" "跳过软件包列表备份 (已完成或已禁用)"
+        fi
+        
+        # 备份系统日志
+        if [ "$SKIP_LOGS" != "true" ] && [ "$BACKUP_LOGS" == "true" ]; then
+            backup_logs || backup_errors=$((backup_errors + 1))
+        else
+            log "INFO" "跳过系统日志备份 (已完成或已禁用)"
+        fi
     fi
     
     # 报告备份错误

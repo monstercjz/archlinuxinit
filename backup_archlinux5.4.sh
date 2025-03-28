@@ -17,6 +17,15 @@
 #   - 恢复点功能（在关键步骤创建检查点以便从故障中恢复）
 # 5.2 版本
 #   - 备份进度显示（支持进度条或百分比显示）
+# 5.3 版本
+#   - 并行备份功能（支持多任务同时执行，提高备份速度）
+#   - 新增配置选项：PARALLEL_BACKUP 和 PARALLEL_JOBS
+#   - 支持 GNU Parallel 工具（如已安装）或使用内置的后台进程实现
+# 5.4 版本
+#   - 依赖性检查增强：更全面地检查所有必要的依赖项
+#   - 添加工具版本检查功能，确保工具版本满足最低要求
+#   - 分类检查核心依赖、压缩工具、网络工具、加密工具和恢复测试工具
+#   - 提供更详细的错误信息和安装建议
 #############################################################
 
 # 获取实际用户（处理sudo情况）
@@ -85,14 +94,89 @@ check_command() {
     command -v "$1" >/dev/null 2>&1 || { log "ERROR" "命令 $1 未安装，请先安装该命令"; exit 1; }
 }
 
+# 检查命令版本
+check_command_version() {
+    local cmd=$1
+    local min_version=$2
+    local version_option=${3:---version}
+    local version_regex=${4:-'[0-9]+(\.[0-9]+)+'}
+    
+    # 获取命令版本
+    local version_output
+    version_output=$($cmd $version_option 2>&1 | grep -Eo "$version_regex" | head -1)
+    
+    if [ -z "$version_output" ]; then
+        log "WARN" "无法获取 $cmd 的版本信息"
+        return 0
+    fi
+    
+    # 比较版本
+    if [ "$(printf '%s\n' "$min_version" "$version_output" | sort -V | head -n1)" != "$min_version" ]; then
+        log "INFO" "$cmd 版本 $version_output 满足最低要求 $min_version"
+        return 0
+    else
+        log "WARN" "$cmd 版本 $version_output 低于推荐的最低版本 $min_version"
+        return 1
+    fi
+}
+
 # 检查必要的命令
 check_dependencies() {
     log "INFO" "检查依赖..."
-    check_command "rsync"
-    check_command "pacman"
-    check_command "journalctl"
+    local missing_deps=0
+    local optional_missing=0
     
-    # 检查可选依赖：pv（用于显示进度条）
+    # 核心依赖检查 - 这些是必须的
+    log "INFO" "检查核心依赖..."
+    local core_deps=("rsync" "pacman" "journalctl" "tar" "find" "grep" "awk" "sed")
+    local core_desc=("远程同步工具" "包管理器" "日志查看工具" "归档工具" "文件查找工具" "文本搜索工具" "文本处理工具" "流编辑器")
+    
+    for i in "${!core_deps[@]}"; do
+        if ! command -v "${core_deps[$i]}" >/dev/null 2>&1; then
+            log "ERROR" "核心依赖 ${core_deps[$i]} (${core_desc[$i]}) 未安装"
+            log "INFO" "请使用以下命令安装: sudo pacman -S ${core_deps[$i]}"
+            missing_deps=$((missing_deps + 1))
+        else
+            log "INFO" "核心依赖 ${core_deps[$i]} 已安装"
+            
+            # 对特定工具进行版本检查
+            case "${core_deps[$i]}" in
+                "rsync")
+                    check_command_version "rsync" "3.1.0"
+                    ;;
+                "tar")
+                    check_command_version "tar" "1.30"
+                    ;;
+            esac
+        fi
+    done
+    
+    # 压缩工具依赖检查
+    log "INFO" "检查压缩工具依赖..."
+    local compression_tools=("gzip" "bzip2" "xz")
+    local compression_desc=("gzip压缩工具" "bzip2压缩工具" "xz压缩工具")
+    
+    for i in "${!compression_tools[@]}"; do
+        if ! command -v "${compression_tools[$i]}" >/dev/null 2>&1; then
+            if [ "$COMPRESS_BACKUP" == "true" ] && [ "$COMPRESS_METHOD" == "${compression_tools[$i]}" ]; then
+                log "ERROR" "所选压缩工具 ${compression_tools[$i]} (${compression_desc[$i]}) 未安装"
+                log "INFO" "请使用以下命令安装: sudo pacman -S ${compression_tools[$i]}"
+                missing_deps=$((missing_deps + 1))
+            else
+                log "WARN" "压缩工具 ${compression_tools[$i]} 未安装，如需使用该压缩方法请先安装"
+                optional_missing=$((optional_missing + 1))
+            fi
+        else
+            if [ "$COMPRESS_BACKUP" == "true" ] && [ "$COMPRESS_METHOD" == "${compression_tools[$i]}" ]; then
+                log "INFO" "所选压缩工具 ${compression_tools[$i]} 已安装"
+            else
+                log "DEBUG" "压缩工具 ${compression_tools[$i]} 已安装"
+            fi
+        fi
+    done
+    
+    # 进度显示工具检查
+    log "INFO" "检查进度显示工具..."
     if command -v "pv" >/dev/null 2>&1; then
         log "INFO" "检测到 pv 工具，将启用备份进度显示"
         USE_PROGRESS_BAR=true
@@ -100,26 +184,96 @@ check_dependencies() {
         log "WARN" "未检测到 pv 工具，备份进度显示将使用 rsync 内置的进度功能"
         log "INFO" "提示：安装 pv 工具可获得更好的进度显示体验 (sudo pacman -S pv)"
         USE_PROGRESS_BAR=false
+        optional_missing=$((optional_missing + 1))
     fi
     
-    # 如果启用了压缩，检查相应的压缩命令
-    if [ "$COMPRESS_BACKUP" == "true" ]; then
-        case "$COMPRESS_METHOD" in
-            "gzip")
-                check_command "gzip"
-                ;;
-            "bzip2")
-                check_command "bzip2"
-                ;;
-            "xz")
-                check_command "xz"
-                ;;
-            *)
-                log "WARN" "未知的压缩方法: $COMPRESS_METHOD，将使用 gzip"
-                COMPRESS_METHOD="gzip"
-                check_command "gzip"
-                ;;
-        esac
+    # 并行处理工具检查
+    if [ "$PARALLEL_BACKUP" == "true" ]; then
+        log "INFO" "检查并行处理工具..."
+        if command -v "parallel" >/dev/null 2>&1; then
+            log "INFO" "检测到 GNU Parallel 工具，将启用并行备份功能"
+            HAS_PARALLEL=true
+            # 检查 GNU Parallel 版本
+            check_command_version "parallel" "20180222"
+        else
+            log "WARN" "未检测到 GNU Parallel 工具，将使用内置的后台进程实现并行备份"
+            log "INFO" "提示：安装 GNU Parallel 工具可获得更好的并行备份体验 (sudo pacman -S parallel)"
+            HAS_PARALLEL=false
+            optional_missing=$((optional_missing + 1))
+        fi
+    fi
+    
+    # 网络工具检查（如果配置了网络备份）
+    if [ "${NETWORK_BACKUP:-false}" == "true" ]; then
+        log "INFO" "检查网络备份工具..."
+        local network_tools=("ssh" "scp" "curl")
+        local network_desc=("SSH客户端" "安全复制工具" "网络传输工具")
+        
+        for i in "${!network_tools[@]}"; do
+            if ! command -v "${network_tools[$i]}" >/dev/null 2>&1; then
+                log "ERROR" "网络工具 ${network_tools[$i]} (${network_desc[$i]}) 未安装，但网络备份功能已启用"
+                log "INFO" "请使用以下命令安装: sudo pacman -S ${network_tools[$i]}"
+                missing_deps=$((missing_deps + 1))
+            else
+                log "INFO" "网络工具 ${network_tools[$i]} 已安装"
+            fi
+        done
+    fi
+    
+    # 加密工具检查（如果配置了加密备份）
+    if [ "${ENCRYPT_BACKUP:-false}" == "true" ]; then
+        log "INFO" "检查加密工具..."
+        local crypto_tools=("gpg" "openssl")
+        local crypto_desc=("GnuPG加密工具" "OpenSSL加密库")
+        
+        for i in "${!crypto_tools[@]}"; do
+            if ! command -v "${crypto_tools[$i]}" >/dev/null 2>&1; then
+                log "ERROR" "加密工具 ${crypto_tools[$i]} (${crypto_desc[$i]}) 未安装，但加密备份功能已启用"
+                log "INFO" "请使用以下命令安装: sudo pacman -S ${crypto_tools[$i]}"
+                missing_deps=$((missing_deps + 1))
+            else
+                log "INFO" "加密工具 ${crypto_tools[$i]} 已安装"
+                
+                # 对特定加密工具进行版本检查
+                case "${crypto_tools[$i]}" in
+                    "gpg")
+                        check_command_version "gpg" "2.2.0"
+                        ;;
+                    "openssl")
+                        check_command_version "openssl" "1.1.0" "version" "[0-9]+(\.[0-9]+)+[a-z]*"
+                        ;;
+                esac
+            fi
+        done
+    fi
+    
+    # 恢复测试工具检查（如果配置了恢复测试）
+    if [ "${TEST_RESTORE:-false}" == "true" ]; then
+        log "INFO" "检查恢复测试工具..."
+        local test_tools=("diff" "cmp")
+        local test_desc=("文件比较工具" "字节比较工具")
+        
+        for i in "${!test_tools[@]}"; do
+            if ! command -v "${test_tools[$i]}" >/dev/null 2>&1; then
+                log "ERROR" "测试工具 ${test_tools[$i]} (${test_desc[$i]}) 未安装，但恢复测试功能已启用"
+                log "INFO" "请使用以下命令安装: sudo pacman -S ${test_tools[$i]}"
+                missing_deps=$((missing_deps + 1))
+            else
+                log "INFO" "测试工具 ${test_tools[$i]} 已安装"
+            fi
+        done
+    fi
+    
+    # 依赖检查结果汇总
+    if [ $missing_deps -gt 0 ]; then
+        log "ERROR" "检测到 $missing_deps 个必要依赖缺失，请安装后再运行脚本"
+        return 1
+    else
+        if [ $optional_missing -gt 0 ]; then
+            log "WARN" "检测到 $optional_missing 个可选依赖缺失，某些功能可能受限"
+        fi
+        log "INFO" "所有必要依赖检查通过"
+        return 0
     fi
 }
 
@@ -199,6 +353,14 @@ DIFF_BACKUP=false
 # 是否验证备份 (true/false)
 # 验证备份会检查备份文件的完整性
 VERIFY_BACKUP=false
+
+# 是否启用并行备份 (true/false)
+# 并行备份可以同时执行多个备份任务，提高备份速度
+PARALLEL_BACKUP=false
+
+# 并行备份的最大任务数
+# 建议设置为CPU核心数或略低于核心数
+PARALLEL_JOBS=4
 
 # 日志保留天数
 LOG_RETENTION_DAYS=30
@@ -1089,6 +1251,112 @@ check_recovery_point() {
     return 0
 }
 
+# 并行执行备份任务
+run_parallel_backup() {
+    local tasks=($@)
+    local results=()  
+    local pids=()  # 存储后台进程的PID
+    local task_count=${#tasks[@]}
+    local completed=0
+    local failed=0
+    
+    log "INFO" "开始并行备份，共 $task_count 个任务，最大并行数 $PARALLEL_JOBS"
+    
+    # 使用GNU Parallel执行任务
+    if [ "$HAS_PARALLEL" == "true" ]; then
+        log "INFO" "使用 GNU Parallel 执行并行备份"
+        
+        # 创建临时任务文件
+        local task_file="${BACKUP_ROOT}/parallel_tasks_${TIMESTAMP}.txt"
+        for task in "${tasks[@]}"; do
+            echo "$task" >> "$task_file"
+        done
+        
+        # 使用GNU Parallel执行任务
+        parallel --jobs "$PARALLEL_JOBS" --joblog "${BACKUP_ROOT}/parallel_log_${TIMESTAMP}.txt" < "$task_file"
+        
+        # 检查结果
+        local parallel_exit=$?
+        if [ $parallel_exit -eq 0 ]; then
+            log "INFO" "并行备份任务全部完成"
+        else
+            log "WARN" "并行备份任务部分失败，退出码: $parallel_exit"
+        fi
+        
+        # 清理临时文件
+        rm -f "$task_file"
+        
+        return $parallel_exit
+    else
+        # 使用bash后台进程实现并行
+        log "INFO" "使用bash后台进程实现并行备份"
+        
+        # 创建临时目录存储任务结果
+        local temp_dir="${BACKUP_ROOT}/parallel_results_${TIMESTAMP}"
+        mkdir -p "$temp_dir"
+        
+        # 启动任务，控制并行数量
+        local running=0
+        local i=0
+        
+        while [ $i -lt $task_count ]; do
+            # 检查当前运行的任务数量
+            if [ $running -lt $PARALLEL_JOBS ]; then
+                local task=${tasks[$i]}
+                local result_file="${temp_dir}/result_${i}.txt"
+                
+                # 在后台执行任务并将结果保存到文件
+                eval "$task; echo \$? > '$result_file'" &
+                pids+=($!)
+                
+                log "INFO" "启动任务 #$((i+1)): ${task:0:50}... (PID: ${pids[-1]})"
+                
+                running=$((running + 1))
+                i=$((i + 1))
+            else
+                # 等待任意一个任务完成
+                wait -n 2>/dev/null || true
+                running=$((running - 1))
+            fi
+        done
+        
+        # 等待所有任务完成
+        log "INFO" "等待所有并行任务完成..."
+        wait
+        
+        # 收集结果
+        for ((i=0; i<$task_count; i++)); do
+            local result_file="${temp_dir}/result_${i}.txt"
+            if [ -f "$result_file" ]; then
+                local exit_code=$(cat "$result_file")
+                results+=($exit_code)
+                
+                if [ "$exit_code" -eq 0 ]; then
+                    completed=$((completed + 1))
+                else
+                    failed=$((failed + 1))
+                    log "WARN" "任务 #$((i+1)) 失败，退出码: $exit_code"
+                fi
+            else
+                log "ERROR" "任务 #$((i+1)) 的结果文件不存在"
+                failed=$((failed + 1))
+            fi
+        done
+        
+        # 清理临时文件
+        rm -rf "$temp_dir"
+        
+        # 报告结果
+        log "INFO" "并行备份完成: $completed 成功, $failed 失败"
+        
+        if [ $failed -eq 0 ]; then
+            return 0
+        else
+            return 1
+        fi
+    fi
+}
+
 # 主函数
 main() {
     log "INFO" "开始 Arch Linux 备份 (${TIMESTAMP})"
@@ -1140,39 +1408,84 @@ main() {
     # 执行备份，根据跳过标志和配置决定是否执行
     local backup_errors=0
     
-    # 备份系统配置
-    if [ "$SKIP_SYSTEM_CONFIG" != "true" ] && [ "$BACKUP_SYSTEM_CONFIG" == "true" ]; then
-        backup_system_config || backup_errors=$((backup_errors + 1))
+    # 判断是否使用并行备份
+    if [ "$PARALLEL_BACKUP" == "true" ]; then
+        log "INFO" "启用并行备份模式，最大并行任务数: $PARALLEL_JOBS"
+        
+        # 准备并行任务列表
+        local parallel_tasks=()
+        
+        # 添加备份任务到列表
+        if [ "$SKIP_SYSTEM_CONFIG" != "true" ] && [ "$BACKUP_SYSTEM_CONFIG" == "true" ]; then
+            parallel_tasks+=("backup_system_config")
+        fi
+        
+        if [ "$SKIP_USER_CONFIG" != "true" ] && [ "$BACKUP_USER_CONFIG" == "true" ]; then
+            parallel_tasks+=("backup_user_config")
+        fi
+        
+        if [ "$SKIP_CUSTOM_PATHS" != "true" ] && [ "$BACKUP_CUSTOM_PATHS" == "true" ]; then
+            parallel_tasks+=("backup_custom_paths")
+        fi
+        
+        if [ "$SKIP_PACKAGES" != "true" ] && [ "$BACKUP_PACKAGES" == "true" ]; then
+            parallel_tasks+=("backup_packages")
+        fi
+        
+        if [ "$SKIP_LOGS" != "true" ] && [ "$BACKUP_LOGS" == "true" ]; then
+            parallel_tasks+=("backup_logs")
+        fi
+        
+        # 执行并行备份
+        if [ ${#parallel_tasks[@]} -gt 0 ]; then
+            log "INFO" "开始执行 ${#parallel_tasks[@]} 个并行备份任务"
+            if ! run_parallel_backup "${parallel_tasks[@]}"; then
+                backup_errors=$((backup_errors + 1))
+                log "WARN" "并行备份任务部分失败，请检查日志获取详细信息"
+            else
+                log "INFO" "并行备份任务全部成功完成"
+            fi
+        else
+            log "INFO" "没有需要执行的备份任务"
+        fi
     else
-        log "INFO" "跳过系统配置备份 (已完成或已禁用)"
-    fi
-    
-    # 备份用户配置
-    if [ "$SKIP_USER_CONFIG" != "true" ] && [ "$BACKUP_USER_CONFIG" == "true" ]; then
-        backup_user_config || backup_errors=$((backup_errors + 1))
-    else
-        log "INFO" "跳过用户配置备份 (已完成或已禁用)"
-    fi
-    
-    # 备份自定义路径
-    if [ "$SKIP_CUSTOM_PATHS" != "true" ] && [ "$BACKUP_CUSTOM_PATHS" == "true" ]; then
-        backup_custom_paths || backup_errors=$((backup_errors + 1))
-    else
-        log "INFO" "跳过自定义路径备份 (已完成或已禁用)"
-    fi
-    
-    # 备份软件包列表
-    if [ "$SKIP_PACKAGES" != "true" ] && [ "$BACKUP_PACKAGES" == "true" ]; then
-        backup_packages || backup_errors=$((backup_errors + 1))
-    else
-        log "INFO" "跳过软件包列表备份 (已完成或已禁用)"
-    fi
-    
-    # 备份系统日志
-    if [ "$SKIP_LOGS" != "true" ] && [ "$BACKUP_LOGS" == "true" ]; then
-        backup_logs || backup_errors=$((backup_errors + 1))
-    else
-        log "INFO" "跳过系统日志备份 (已完成或已禁用)"
+        # 顺序执行备份任务
+        log "INFO" "使用顺序备份模式"
+        
+        # 备份系统配置
+        if [ "$SKIP_SYSTEM_CONFIG" != "true" ] && [ "$BACKUP_SYSTEM_CONFIG" == "true" ]; then
+            backup_system_config || backup_errors=$((backup_errors + 1))
+        else
+            log "INFO" "跳过系统配置备份 (已完成或已禁用)"
+        fi
+        
+        # 备份用户配置
+        if [ "$SKIP_USER_CONFIG" != "true" ] && [ "$BACKUP_USER_CONFIG" == "true" ]; then
+            backup_user_config || backup_errors=$((backup_errors + 1))
+        else
+            log "INFO" "跳过用户配置备份 (已完成或已禁用)"
+        fi
+        
+        # 备份自定义路径
+        if [ "$SKIP_CUSTOM_PATHS" != "true" ] && [ "$BACKUP_CUSTOM_PATHS" == "true" ]; then
+            backup_custom_paths || backup_errors=$((backup_errors + 1))
+        else
+            log "INFO" "跳过自定义路径备份 (已完成或已禁用)"
+        fi
+        
+        # 备份软件包列表
+        if [ "$SKIP_PACKAGES" != "true" ] && [ "$BACKUP_PACKAGES" == "true" ]; then
+            backup_packages || backup_errors=$((backup_errors + 1))
+        else
+            log "INFO" "跳过软件包列表备份 (已完成或已禁用)"
+        fi
+        
+        # 备份系统日志
+        if [ "$SKIP_LOGS" != "true" ] && [ "$BACKUP_LOGS" == "true" ]; then
+            backup_logs || backup_errors=$((backup_errors + 1))
+        else
+            log "INFO" "跳过系统日志备份 (已完成或已禁用)"
+        fi
     fi
     
     # 报告备份错误
