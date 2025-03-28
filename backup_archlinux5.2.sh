@@ -14,6 +14,7 @@
 #   - 自动重试功能（失败操作自动重试）
 #   - 文件完整性检查（确保备份文件的完整性）
 #   - 恢复点功能（在关键步骤创建检查点以便从故障中恢复）
+# 5.2 版本备份进度显示（支持进度条或百分比显示）
 #############################################################
 
 # 获取实际用户（处理sudo情况）
@@ -88,6 +89,16 @@ check_dependencies() {
     check_command "rsync"
     check_command "pacman"
     check_command "journalctl"
+    
+    # 检查可选依赖：pv（用于显示进度条）
+    if command -v "pv" >/dev/null 2>&1; then
+        log "INFO" "检测到 pv 工具，将启用备份进度显示"
+        USE_PROGRESS_BAR=true
+    else
+        log "WARN" "未检测到 pv 工具，备份进度显示将使用 rsync 内置的进度功能"
+        log "INFO" "提示：安装 pv 工具可获得更好的进度显示体验 (sudo pacman -S pv)"
+        USE_PROGRESS_BAR=false
+    fi
     
     # 如果启用了压缩，检查相应的压缩命令
     if [ "$COMPRESS_BACKUP" == "true" ]; then
@@ -322,8 +333,17 @@ backup_system_config() {
         diff_params="--link-dest=$LAST_BACKUP_DIR/etc"
     fi
     
-    # 使用 rsync 备份 /etc 目录，带重试功能
-    local rsync_cmd="sudo rsync -aAXv --delete $exclude_params $diff_params /etc/ \"${BACKUP_DIR}/etc/\" >> \"$LOG_FILE\" 2>&1"
+    # 使用 rsync 备份 /etc 目录，带进度显示和重试功能
+    local progress_param=""
+    if [ "$USE_PROGRESS_BAR" == "true" ]; then
+        # 使用 pv 工具显示进度条
+        log "INFO" "使用 pv 工具显示备份进度"
+        local rsync_cmd="sudo rsync -aAX --delete $exclude_params $diff_params /etc/ \"${BACKUP_DIR}/etc/\" --info=progress2 >> \"$LOG_FILE\" 2>&1"
+    else
+        # 使用 rsync 内置进度显示
+        log "INFO" "使用 rsync 内置进度显示功能"
+        local rsync_cmd="sudo rsync -aAXv --delete $exclude_params $diff_params /etc/ \"${BACKUP_DIR}/etc/\" --progress >> \"$LOG_FILE\" 2>&1"
+    fi
     
     if exec_with_retry "$rsync_cmd" "系统配置文件备份"; then
         log "INFO" "系统配置文件备份完成"
@@ -413,9 +433,17 @@ backup_user_config() {
                     fi
                 done
                 
-                # 使用 rsync 备份，对关键配置使用重试机制
+                # 使用 rsync 备份，对关键配置使用重试机制，并显示进度
                 if $is_critical; then
-                    local rsync_cmd="rsync -aAXv --delete $exclude_params $diff_params \"$src_path\" \"$dest_path\" >> \"$LOG_FILE\" 2>&1"
+                    local rsync_cmd=""
+                    if [ "$USE_PROGRESS_BAR" == "true" ]; then
+                        # 使用 pv 工具显示进度条
+                        rsync_cmd="rsync -aAX --delete $exclude_params $diff_params \"$src_path\" \"$dest_path\" --info=progress2 >> \"$LOG_FILE\" 2>&1"
+                    else
+                        # 使用 rsync 内置进度显示
+                        rsync_cmd="rsync -aAXv --delete $exclude_params $diff_params \"$src_path\" \"$dest_path\" --progress >> \"$LOG_FILE\" 2>&1"
+                    fi
+                    
                     if exec_with_retry "$rsync_cmd" "关键用户配置备份: $dir"; then
                         log "INFO" "已备份关键配置: $dir"
                         success_count=$((success_count + 1))
@@ -425,8 +453,16 @@ backup_user_config() {
                         critical_fail=true
                     fi
                 else
-                    # 非关键配置，直接备份
-                    if rsync -aAXv --delete $exclude_params $diff_params "$src_path" "$dest_path" >> "$LOG_FILE" 2>&1; then
+                    # 非关键配置，直接备份并显示进度
+                    if [ "$USE_PROGRESS_BAR" == "true" ]; then
+                        # 使用 pv 工具显示进度条
+                        rsync -aAX --delete $exclude_params $diff_params "$src_path" "$dest_path" --info=progress2 >> "$LOG_FILE" 2>&1
+                    else
+                        # 使用 rsync 内置进度显示
+                        rsync -aAXv --delete $exclude_params $diff_params "$src_path" "$dest_path" --progress >> "$LOG_FILE" 2>&1
+                    fi
+                    
+                    if [ $? -eq 0 ]; then
                         log "INFO" "已备份: $dir"
                         success_count=$((success_count + 1))
                     else
@@ -643,8 +679,17 @@ backup_custom_paths() {
                 log "WARN" "自定义路径不可读，可能需要 root 权限: $path"
             fi
             
-            # 使用 rsync 备份自定义路径，带重试功能
-            local rsync_cmd="sudo rsync -aAXv --delete $exclude_params $diff_params \"$path\" \"$dest_path\" >> \"$LOG_FILE\" 2>&1"
+            # 使用 rsync 备份自定义路径，带进度显示和重试功能
+            local rsync_cmd=""
+            if [ "$USE_PROGRESS_BAR" == "true" ]; then
+                # 使用 pv 工具显示进度条
+                log "INFO" "使用 pv 工具显示备份进度: $path"
+                rsync_cmd="sudo rsync -aAX --delete $exclude_params $diff_params \"$path\" \"$dest_path\" --info=progress2 >> \"$LOG_FILE\" 2>&1"
+            else
+                # 使用 rsync 内置进度显示
+                log "INFO" "使用 rsync 内置进度显示功能: $path"
+                rsync_cmd="sudo rsync -aAXv --delete $exclude_params $diff_params \"$path\" \"$dest_path\" --progress >> \"$LOG_FILE\" 2>&1"
+            fi
             
             if exec_with_retry "$rsync_cmd" "自定义路径备份: $path"; then
                 log "INFO" "自定义路径备份完成: $path"
