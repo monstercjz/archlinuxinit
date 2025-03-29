@@ -41,6 +41,25 @@ INTERACTIVE=true
 DRY_RUN=false
 
 # 创建日志函数
+# 功能：记录不同级别的日志信息到日志文件并显示在终端上
+# 参数：
+#   $1 - 日志级别（INFO, WARN, ERROR, FATAL, DEBUG）
+#   $2 - 日志消息内容
+# 返回值：
+#   无返回值，但如果日志级别为FATAL，则会终止脚本执行
+# 错误处理：
+#   FATAL级别的日志会导致脚本立即退出（exit 1）
+#   其他级别的日志不会中断脚本执行
+# 颜色编码：
+#   INFO - 绿色
+#   WARN - 黄色
+#   ERROR - 红色
+#   FATAL - 红色
+#   DEBUG - 蓝色
+# 使用示例：
+#   log "INFO" "开始恢复操作"
+#   log "ERROR" "文件不存在"
+#   log "FATAL" "无法访问备份目录"
 log() {
     local level=$1
     local message=$2
@@ -65,11 +84,34 @@ log() {
 }
 
 # 检查命令是否存在
+# 功能：检查指定的命令是否存在于系统中
+# 参数：
+#   $1 - 要检查的命令名称
+# 返回值：
+#   0 - 命令存在
+#   非0 - 命令不存在（同时会记录错误并退出脚本）
+# 错误处理：
+#   如果命令不存在，会记录错误并立即退出脚本
+# 使用示例：
+#   check_command "rsync"
+#   check_command "tar"
 check_command() {
     command -v "$1" >/dev/null 2>&1 || { log "ERROR" "命令 $1 未安装，请先安装该命令"; exit 1; }
 }
 
 # 检查必要的命令
+# 功能：检查脚本运行所需的所有依赖工具是否已安装
+# 参数：无
+# 返回值：
+#   0 - 所有必要依赖都已安装
+#   1 - 有必要依赖缺失
+# 错误处理：
+#   记录缺失的依赖并提供安装建议
+#   对于非核心依赖，仅发出警告
+# 使用示例：
+#   if ! check_dependencies; then
+#       log "FATAL" "缺少必要依赖，无法继续执行"
+#   fi
 check_dependencies() {
     log "INFO" "检查依赖..."
     local missing_deps=0
@@ -113,6 +155,15 @@ check_dependencies() {
 }
 
 # 加载配置文件
+# 功能：加载配置文件，如果不存在则创建默认配置文件
+# 参数：无，但使用全局变量 CONFIG_FILE
+# 返回值：无
+# 注意事项：
+#   - 如果配置文件不存在，会创建包含默认配置的文件
+#   - 配置文件中的变量会覆盖脚本中的默认值
+# 使用示例：
+#   load_config
+#   log "INFO" "配置加载完成"
 load_config() {
     if [ -f "$CONFIG_FILE" ]; then
         log "INFO" "加载配置文件: $CONFIG_FILE"
@@ -171,6 +222,16 @@ EOF
 }
 
 # 列出可用的备份
+# 功能：查找并列出备份根目录中的所有可用备份
+# 参数：无，但使用全局变量 BACKUP_ROOT
+# 返回值：
+#   0 - 成功找到并列出备份
+#   1 - 未找到可用备份或备份根目录不存在
+# 使用示例：
+#   if ! list_available_backups; then
+#       log "ERROR" "未找到可用的备份"
+#       exit 1
+#   fi
 list_available_backups() {
     log "INFO" "列出可用的备份..."
     
@@ -219,6 +280,15 @@ list_available_backups() {
 }
 
 # 选择备份
+# 功能：列出可用的备份并让用户选择要恢复的备份
+# 参数：无
+# 返回值：
+#   0 - 成功选择备份
+#   1 - 选择失败或用户取消
+# 使用示例：
+#   if ! select_backup; then
+#       log "FATAL" "无法选择备份，退出脚本"
+#   fi
 select_backup() {
     # 列出可用的备份
     if ! list_available_backups; then
@@ -257,6 +327,17 @@ select_backup() {
 }
 
 # 解压备份
+# 功能：如果选择的备份是压缩文件，则解压到临时目录
+# 参数：无，但使用全局变量 SELECTED_BACKUP 和 BACKUP_TYPE
+# 返回值：
+#   0 - 解压成功或不需要解压
+#   1 - 解压失败
+# 使用示例：
+#   if ! extract_backup; then
+#       log "ERROR" "备份解压失败"
+#       cleanup
+#       exit 1
+#   fi
 extract_backup() {
     if [ "$BACKUP_TYPE" != "compressed" ]; then
         # 不需要解压
@@ -312,6 +393,17 @@ extract_backup() {
 }
 
 # 检查备份完整性
+# 功能：检查选定备份的完整性，确保关键目录存在
+# 参数：无，但使用全局变量 SELECTED_BACKUP 和 BACKUP_TYPE
+# 返回值：
+#   0 - 备份完整或用户确认继续
+#   1 - 备份不完整且用户取消恢复
+# 使用示例：
+#   if ! check_backup_integrity; then
+#       log "ERROR" "备份完整性检查失败"
+#       cleanup
+#       exit 1
+#   fi
 check_backup_integrity() {
     log "INFO" "检查备份完整性..."
     
@@ -351,6 +443,17 @@ check_backup_integrity() {
 }
 
 # 选择要恢复的内容
+# 功能：让用户选择要恢复的内容（系统配置、用户配置、自定义路径、软件包列表）
+# 参数：无，但会设置全局变量 RESTORE_SYSTEM_CONFIG, RESTORE_USER_CONFIG, RESTORE_CUSTOM_PATHS, RESTORE_PACKAGES
+# 返回值：
+#   0 - 成功选择恢复内容
+#   1 - 选择失败或用户取消
+# 使用示例：
+#   if ! select_restore_content; then
+#       log "INFO" "用户取消了恢复操作"
+#       cleanup
+#       exit 0
+#   fi
 select_restore_content() {
     if [ "$INTERACTIVE" != "true" ]; then
         # 非交互模式，恢复所有内容
@@ -470,6 +573,17 @@ select_restore_content() {
 }
 
 # 确认恢复操作
+# 功能：显示恢复操作的摘要并请求用户确认
+# 参数：无，但使用多个全局变量来显示恢复信息
+# 返回值：
+#   0 - 用户确认恢复
+#   1 - 用户取消恢复
+# 使用示例：
+#   if ! confirm_restore; then
+#       log "INFO" "用户取消了恢复操作"
+#       cleanup
+#       exit 0
+#   fi
 confirm_restore() {
     if [ "$FORCE_RESTORE" == "true" ]; then
         log "INFO" "强制恢复模式: 跳过确认"
@@ -503,6 +617,19 @@ confirm_restore() {
 }
 
 # 恢复系统配置
+# 功能：从备份中恢复系统配置（/etc目录）
+# 参数：无，但使用全局变量 SELECTED_BACKUP 和 RESTORE_SYSTEM_CONFIG
+# 返回值：
+#   0 - 系统配置恢复成功或跳过
+#   1 - 系统配置恢复失败
+# 注意事项：
+#   - 需要root权限
+#   - 会先备份当前系统配置到临时目录
+#   - 在测试模式下不会实际修改系统
+# 使用示例：
+#   if ! restore_system_config; then
+#       log "ERROR" "系统配置恢复失败"
+#   fi
 restore_system_config() {
     if [ "$RESTORE_SYSTEM_CONFIG" != "true" ]; then
         log "INFO" "跳过系统配置恢复"
@@ -563,6 +690,18 @@ restore_system_config() {
 }
 
 # 恢复用户配置
+# 功能：从备份中恢复用户配置文件（家目录下的配置文件）
+# 参数：无，但使用全局变量 SELECTED_BACKUP 和 RESTORE_USER_CONFIG
+# 返回值：
+#   0 - 用户配置恢复成功或跳过
+#   1 - 用户配置恢复部分失败
+# 注意事项：
+#   - 会处理文件冲突，提供多种冲突解决选项
+#   - 在测试模式下不会实际修改用户文件
+# 使用示例：
+#   if ! restore_user_config; then
+#       log "WARN" "用户配置恢复部分失败"
+#   fi
 restore_user_config() {
     if [ "$RESTORE_USER_CONFIG" != "true" ]; then
         log "INFO" "跳过用户配置恢复"
@@ -706,6 +845,19 @@ restore_user_config() {
 }
 
 # 恢复自定义路径
+# 功能：从备份中恢复自定义路径（如/opt, /var/www等）
+# 参数：无，但使用全局变量 SELECTED_BACKUP 和 RESTORE_CUSTOM_PATHS
+# 返回值：
+#   0 - 自定义路径恢复成功或跳过
+#   1 - 自定义路径恢复部分失败
+# 注意事项：
+#   - 可能需要root权限（取决于恢复路径）
+#   - 会处理路径冲突，提供多种冲突解决选项
+#   - 在测试模式下不会实际修改文件系统
+# 使用示例：
+#   if ! restore_custom_paths; then
+#       log "WARN" "自定义路径恢复部分失败"
+#   fi
 restore_custom_paths() {
     if [ "$RESTORE_CUSTOM_PATHS" != "true" ]; then
         log "INFO" "跳过自定义路径恢复"
@@ -901,6 +1053,19 @@ restore_custom_paths() {
 }
 
 # 恢复软件包列表
+# 功能：从备份中恢复软件包列表（官方仓库和AUR）
+# 参数：无，但使用全局变量 SELECTED_BACKUP 和 RESTORE_PACKAGES
+# 返回值：
+#   0 - 软件包列表恢复成功或跳过
+#   1 - 软件包列表恢复失败
+# 注意事项：
+#   - 需要root权限
+#   - 恢复AUR软件包需要AUR助手（yay, paru或pamac）
+#   - 在测试模式下不会实际安装软件包
+# 使用示例：
+#   if ! restore_packages; then
+#       log "ERROR" "软件包列表恢复失败"
+#   fi
 restore_packages() {
     if [ "$RESTORE_PACKAGES" != "true" ]; then
         log "INFO" "跳过软件包列表恢复"
@@ -1072,6 +1237,15 @@ restore_packages() {
 }
 
 # 清理临时文件
+# 功能：清理恢复过程中创建的临时文件和目录
+# 参数：无，但使用全局变量 TEMP_EXTRACT_DIR 和 DRY_RUN
+# 返回值：无
+# 注意事项：
+#   - 应在脚本结束前调用，无论恢复成功与否
+#   - 会删除临时解压目录和测试模式的临时目录
+# 使用示例：
+#   cleanup
+#   exit 0
 cleanup() {
     log "INFO" "清理临时文件..."
     
@@ -1091,6 +1265,12 @@ cleanup() {
 }
 
 # 显示帮助信息
+# 功能：显示脚本的使用方法和可用选项
+# 参数：无
+# 返回值：无
+# 使用示例：
+#   show_help
+#   exit 0
 show_help() {
     echo "Arch Linux 自动恢复脚本"
     echo "用法: $0 [选项]"
@@ -1115,6 +1295,15 @@ show_help() {
 }
 
 # 主函数
+# 功能：脚本的主要执行流程，处理命令行参数并调用其他函数
+# 参数：
+#   $@ - 命令行参数
+# 返回值：
+#   0 - 恢复成功
+#   非0 - 恢复失败
+# 使用示例：
+#   main "$@"
+#   exit $?
 main() {
     # 检查是否有参数
     if [ $# -eq 0 ]; then
