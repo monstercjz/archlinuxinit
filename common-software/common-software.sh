@@ -124,7 +124,7 @@ install_software() {
       log "ERROR" "打开界面 $software 失败"
     fi
   fi
-  essential_software_menu
+  common_software_menu
 }
 
 other_software_menu() {

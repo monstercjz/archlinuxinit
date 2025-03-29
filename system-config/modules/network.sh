@@ -342,7 +342,14 @@ modify_gateway() {
     NETWORK_CONFIG
     return
   fi
-
+ # 检查当前连接是否已经配置了 IP 地址
+  current_ip=$(nmcli -t -f ipv4.addresses connection show "$connection_name" | awk -F: '{print $1}')
+  if [ -z "$current_ip" ]; then
+    echo -e "${COLOR_RED}当前连接 $connection_name 没有配置 IP 地址，请先配置 IP 地址。${COLOR_RESET}"
+    log "ERROR" "当前连接 $connection_name 没有配置 IP 地址，请先配置 IP 地址。"
+    NETWORK_CONFIG
+    return
+  fi
   read -p "请输入新的网关地址 (例如 192.168.1.1): " gateway
 
   if confirm_action; then
