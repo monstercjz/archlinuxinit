@@ -103,6 +103,7 @@ main_menu() {
   echo -e "${COLOR_YELLOW}2. 基础软件安装${COLOR_RESET}"
   echo -e "${COLOR_YELLOW}3. 常用软件安装${COLOR_RESET}"
   echo -e "${COLOR_YELLOW}4. SHELL-ZSH 美化${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}5. ZSH 管理${COLOR_RESET}"
   echo -e "${COLOR_BLUE}9. 清屏${COLOR_RESET}"
   echo -e "${COLOR_RED}0. 退出${COLOR_RESET}"
   read -p "请选择菜单 (输入：0/1/2/3/4/9 中任一): " choice
@@ -110,7 +111,8 @@ main_menu() {
     1) system_config_menu ;;
     2) basic_software_menu ;;
     3) common_software_menu ;;
-    4) zsh_manager_menu ;;
+    4) zsh_plugins_menu ;;
+    5) zsh_manager_menu ;;
     9) clear_screen ;;
     0) exit 0 ;;
     *) wait_right_choice ;;
@@ -168,6 +170,19 @@ common_software_menu() {
 }
 
 zsh_manager_menu() {
+  # echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+  echo -e "${COLOR_GREEN}<<<<<<<即将打开 SHELL-ZSH 美化配置菜单>>>>>>${COLOR_RESET}"
+  # echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
+   if confirm_actions; then
+    if bash zsh-manager/zsh-manager.sh; then
+      log "INFO" "SHELL-ZSH 美化配置完毕，成功返回主菜单"
+    else
+      log "ERROR" "打开 SHELL-ZSH 美化配置菜单失败"
+    fi
+   fi
+  main_menu
+}
+zsh_plugins_menu() {
   # echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
   echo -e "${COLOR_GREEN}<<<<<<<即将打开 SHELL-ZSH 美化配置菜单>>>>>>${COLOR_RESET}"
   # echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
