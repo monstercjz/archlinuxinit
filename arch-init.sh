@@ -172,7 +172,7 @@ zsh_manager_menu() {
   echo -e "${COLOR_GREEN}<<<<<<<即将打开 SHELL-ZSH 美化配置菜单>>>>>>${COLOR_RESET}"
   # echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
    if confirm_actions; then
-    if bash zsh-manager/zsh-manager.sh; then
+    if bash zsh-plugins/zsh-plugins.sh; then
       log "INFO" "SHELL-ZSH 美化配置完毕，成功返回主菜单"
     else
       log "ERROR" "打开 SHELL-ZSH 美化配置菜单失败"
