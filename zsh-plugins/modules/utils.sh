@@ -4,10 +4,11 @@
 # 将日志文件放在脚本所在目录的上一级，避免被意外删除或包含在 git 中（如果项目被版本控制）
 # 或者放在 /tmp 或 $HOME/.cache/zsh-plugins/
 # 这里我们选择放在脚本目录内，方便查找
-LOG_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)/../logs" # ../logs 目录
+# LOG_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)/../logs" # ../logs 目录
+LOG_DIR="/var/log/arch-init"
 LOG_FILE="$LOG_DIR/zsh-plugins-install_$(date +%Y%m%d_%H%M%S).log"
 # 确保日志目录存在
-mkdir -p "$LOG_DIR" || echo "警告：无法创建日志目录 $LOG_DIR" >&2
+sudo mkdir -p "$LOG_DIR" || echo "警告：无法创建日志目录 $LOG_DIR" >&2
 
 # 日志记录函数
 # 参数: $1: 日志级别 (INFO, WARN, ERROR, STEP)
