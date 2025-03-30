@@ -27,6 +27,8 @@ SOFTWARE_CHECKS=(
     ["powerlevel10k"]="powerlevel10k" # OMZ 主题
     ["meslolgs-font"]="MesloLGS" # 字体模式
 )
+# 使用 USER_HOME 更新 oh-my-zsh 检查路径
+SOFTWARE_CHECKS["oh-my-zsh"]="${USER_HOME}/.oh-my-zsh"
 
 # 定义必需的依赖项 (包管理器特定的名称)
 declare -A DEPENDENCIES

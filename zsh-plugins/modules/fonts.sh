@@ -39,8 +39,8 @@ get_font_install_dir() {
     local font_dir=""
 
     if [ "$os_type" == "linux" ]; then
-        # 优先使用用户目录
-        font_dir="$HOME/.local/share/fonts"
+        # 优先使用用户目录，使用 USER_HOME
+        font_dir="${USER_HOME}/.local/share/fonts"
         # 如果不存在，尝试系统目录 (需要 sudo)
         # if [ ! -d "$font_dir" ]; then
         #     font_dir="/usr/local/share/fonts"
@@ -48,11 +48,18 @@ get_font_install_dir() {
          # 如果用户目录不存在，则创建它
         if [ ! -d "$font_dir" ]; then
             log INFO "创建用户字体目录: $font_dir"
-            mkdir -p "$font_dir" || { log ERROR "创建目录 $font_dir 失败！"; return 1; }
+            # 创建目录时也考虑 sudo
+            if [ "$EUID" -eq 0 ] && [ -n "$ORIGINAL_USER" ]; then
+                 run_command sudo mkdir -p "$font_dir"
+                 run_command sudo chown "$ORIGINAL_USER:$ORIGINAL_USER" "$font_dir" # 确保所有权
+            else
+                 mkdir -p "$font_dir" || { log ERROR "创建目录 $font_dir 失败！"; return 1; }
+            fi
         fi
 
     elif [ "$os_type" == "macos" ]; then
-        font_dir="$HOME/Library/Fonts"
+        # 使用 USER_HOME
+        font_dir="${USER_HOME}/Library/Fonts"
     else
         log ERROR "不支持的操作系统类型 '$os_type' 用于字体安装。"
         return 1
@@ -153,7 +160,8 @@ install_meslolgs_fonts() {
     fi
 
     log INFO "字体将安装到: $font_install_dir"
-    mkdir -p "$font_install_dir" # 确保目录存在
+    # 确保目录存在 (get_font_install_dir 已处理)
+    # mkdir -p "$font_install_dir"
 
     local all_success=true
     for name in "${!FONT_URLS[@]}"; do
@@ -168,8 +176,32 @@ install_meslolgs_fonts() {
     fi
 
     # 更新字体缓存 (仅 Linux)
+    # fc-cache 通常需要以普通用户身份运行才能更新用户缓存
     if [ "$os_type" == "linux" ]; then
-        update_font_cache
+        if command_exists fc-cache; then
+            log INFO "更新字体缓存..."
+            local fc_cmd="fc-cache -fv"
+            if [ "$EUID" -eq 0 ] && [ -n "$ORIGINAL_USER" ]; then
+                 log INFO "尝试以用户 '$ORIGINAL_USER' 身份运行 fc-cache..."
+                 if run_command sudo runuser -l "$ORIGINAL_USER" -c "$fc_cmd"; then
+                     log INFO "字体缓存更新成功 (以用户 $ORIGINAL_USER 运行)。"
+                 else
+                     log WARN "以用户 '$ORIGINAL_USER' 身份运行 fc-cache 失败。可能需要手动运行。"
+                     all_success=false # 标记为未完全成功
+                 fi
+            else
+                 if run_command $fc_cmd; then
+                     log INFO "字体缓存更新成功。"
+                 else
+                     log WARN "字体缓存更新失败 (fc-cache -fv)。可能需要手动运行。"
+                     all_success=false # 标记为未完全成功
+                 fi
+            fi
+        else
+             log WARN "未找到 'fc-cache' 命令，无法自动更新字体缓存。"
+             log INFO "您可能需要重新登录或重启系统以使新字体生效。"
+             all_success=false # 标记为未完全成功
+        fi
     elif [ "$os_type" == "macos" ]; then
         log INFO "在 macOS 上，字体通常会自动被识别。如果终端未立即显示新字体，请尝试重启终端或系统。"
     fi

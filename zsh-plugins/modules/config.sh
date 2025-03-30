@@ -10,8 +10,9 @@ fi
 # shellcheck source=./utils.sh
 source "$UTILS_PATH"
 
-ZSHRC_FILE="$HOME/.zshrc"
-P10K_CONFIG_FILE="$HOME/.p10k.zsh"
+# 使用 USER_HOME 定义配置文件路径
+ZSHRC_FILE="${USER_HOME}/.zshrc"
+P10K_CONFIG_FILE="${USER_HOME}/.p10k.zsh"
 
 # 期望的插件列表 (根据安装的软件动态调整)
 # 基础插件 'git' 通常由 oh-my-zsh 默认添加
@@ -40,22 +41,59 @@ configure_theme() {
     if grep -qE '^\s*ZSH_THEME=' "$ZSHRC_FILE"; then
         log INFO "找到现有的 ZSH_THEME 设置，将其更新为 Powerlevel10k。"
         # 使用 sed 进行替换。注意 macOS sed 和 GNU sed 的差异 (-i 参数)
-        if sed -i.bak "s|^\\s*ZSH_THEME=.*|$theme_line|" "$ZSHRC_FILE"; then
+        # 修改文件操作需要在目标用户下进行（如果以 sudo 运行）
+        local sed_cmd="sed -i.bak 's|^\\s*ZSH_THEME=.*|$theme_line|' \"$ZSHRC_FILE\""
+        local rm_bak_cmd="rm -f \"${ZSHRC_FILE}.bak\""
+        local sed_success=false
+        if [ "$EUID" -eq 0 ] && [ -n "$ORIGINAL_USER" ]; then
+             # 确保文件所有权正确
+             run_command sudo chown "$ORIGINAL_USER:$ORIGINAL_USER" "$ZSHRC_FILE" || log WARN "无法更改 $ZSHRC_FILE 的所有权"
+             if run_command sudo runuser -l "$ORIGINAL_USER" -c "$sed_cmd"; then
+                 sed_success=true
+                 run_command sudo runuser -l "$ORIGINAL_USER" -c "$rm_bak_cmd" # 尝试删除备份
+             fi
+        else
+             if run_command sed -i.bak "s|^\\s*ZSH_THEME=.*|$theme_line|" "$ZSHRC_FILE"; then
+                 sed_success=true
+                 run_command rm -f "${ZSHRC_FILE}.bak" # 删除备份
+             fi
+        fi
+
+        if $sed_success; then
              log INFO "成功将 ZSH_THEME 更新为 Powerlevel10k。"
-             rm -f "${ZSHRC_FILE}.bak" # 删除备份
              return 0
         else
              log ERROR "使用 sed 更新 ZSH_THEME 失败！请手动修改 $ZSHRC_FILE。"
-             # 恢复备份
-             if [ -f "${ZSHRC_FILE}.bak" ]; then
-                 mv "${ZSHRC_FILE}.bak" "$ZSHRC_FILE"
+             # 恢复备份 (如果存在)
+             local bak_file="${ZSHRC_FILE}.bak"
+             if [ -f "$bak_file" ]; then
+                 local mv_cmd="mv \"$bak_file\" \"$ZSHRC_FILE\""
+                 if [ "$EUID" -eq 0 ] && [ -n "$ORIGINAL_USER" ]; then
+                     run_command sudo runuser -l "$ORIGINAL_USER" -c "$mv_cmd"
+                 else
+                     run_command mv "$bak_file" "$ZSHRC_FILE"
+                 fi
              fi
              return 1
         fi
     else
-        # 如果 ZSH_THEME 行不存在，则添加到文件末尾 (或者更合适的位置，例如 Oh My Zsh 配置块附近)
+        # 如果 ZSH_THEME 行不存在，则添加到文件末尾
         log INFO "未找到 ZSH_THEME 设置，在 $ZSHRC_FILE 末尾添加 Powerlevel10k 主题设置。"
-        if echo -e "\n# 设置 Powerlevel10k 主题\n$theme_line" >> "$ZSHRC_FILE"; then
+        local append_cmd="echo -e \"\n# 设置 Powerlevel10k 主题\n$theme_line\" >> \"$ZSHRC_FILE\""
+        local append_success=false
+         if [ "$EUID" -eq 0 ] && [ -n "$ORIGINAL_USER" ]; then
+             # 确保文件所有权正确
+             run_command sudo chown "$ORIGINAL_USER:$ORIGINAL_USER" "$ZSHRC_FILE" || log WARN "无法更改 $ZSHRC_FILE 的所有权"
+             if run_command sudo runuser -l "$ORIGINAL_USER" -c "$append_cmd"; then
+                 append_success=true
+             fi
+         else
+              if echo -e "\n# 设置 Powerlevel10k 主题\n$theme_line" >> "$ZSHRC_FILE"; then
+                  append_success=true
+              fi
+         fi
+
+        if $append_success; then
              log INFO "成功添加 Powerlevel10k 主题设置。"
              return 0
         else
@@ -74,99 +112,164 @@ configure_plugins() {
         return 1
     fi
 
-    # 从检查结果确定实际安装了哪些插件
-    # 需要从 install.sh 或 check.sh 获取最终状态
-    # 这里我们假设 check.sh 导出了 CHECK_RESULTS_EXPORT
-    if [ -z "$CHECK_RESULTS_EXPORT" ]; then
-        log WARN "缺少检查结果信息，无法精确确定要启用的插件。将尝试启用所有目标插件。"
-        # 添加所有目标插件到 DESIRED_PLUGINS
-        DESIRED_PLUGINS+=("zsh-syntax-highlighting" "zsh-autosuggestions" "fzf" "fzf-tab" "bat" "eza")
-    else
-        declare -A CHECK_RESULTS
-        eval "$CHECK_RESULTS_EXPORT" # 加载检查结果
+    # --- 重新检查插件和工具的安装状态 ---
+    log INFO "重新检查需要启用的插件和工具的安装状态..."
+    # 基础插件 git 总是需要
+    local current_desired_plugins=("git")
 
-        # 根据检查结果动态添加插件
-        [ "${CHECK_RESULTS[zsh-syntax-highlighting]}" != "未安装" ] && DESIRED_PLUGINS+=("zsh-syntax-highlighting")
-        [ "${CHECK_RESULTS[zsh-autosuggestions]}" != "未安装" ] && DESIRED_PLUGINS+=("zsh-autosuggestions")
-        [ "${CHECK_RESULTS[fzf]}" != "未安装" ] && DESIRED_PLUGINS+=("fzf")
-        [ "${CHECK_RESULTS[fzf-tab]}" != "未安装" ] && DESIRED_PLUGINS+=("fzf-tab")
-        [ "${CHECK_RESULTS[bat]}" != "未安装" ] && DESIRED_PLUGINS+=("bat")
-        [ "${CHECK_RESULTS[eza]}" != "未安装" ] && DESIRED_PLUGINS+=("eza")
+    # 检查 OMZ 插件
+    if is_omz_plugin_installed "zsh-syntax-highlighting"; then
+        log INFO "检测到 zsh-syntax-highlighting 已安装。"
+        current_desired_plugins+=("zsh-syntax-highlighting")
+    else
+        log WARN "zsh-syntax-highlighting 未安装，将不会在 .zshrc 中启用。"
+    fi
+    if is_omz_plugin_installed "zsh-autosuggestions"; then
+        log INFO "检测到 zsh-autosuggestions 已安装。"
+        current_desired_plugins+=("zsh-autosuggestions")
+    else
+        log WARN "zsh-autosuggestions 未安装，将不会在 .zshrc 中启用。"
+    fi
+     if is_omz_plugin_installed "fzf-tab"; then
+        log INFO "检测到 fzf-tab 已安装。"
+        current_desired_plugins+=("fzf-tab")
+    else
+        log WARN "fzf-tab 未安装，将不会在 .zshrc 中启用。"
     fi
 
-    # 去重
+    # 检查相关工具 (fzf, bat, eza) 是否安装，决定是否添加它们的 OMZ 插件（如果适用）
+    # 注意：OMZ 的 fzf 插件通常用于加载 fzf 的配置和按键绑定
+    if command_exists fzf; then
+        log INFO "检测到 fzf 命令已安装。"
+        current_desired_plugins+=("fzf") # 添加 fzf 插件
+    else
+         log WARN "fzf 命令未安装，fzf 插件将不会在 .zshrc 中启用。"
+    fi
+    # bat 和 eza 通常不需要特定的 OMZ 插件来启用，别名在 configure_aliases_and_extras 中处理
+    # 但如果将来有需要，可以在这里添加检查
+
+    # 去重 (虽然上面的逻辑应该避免了重复，但保险起见)
     local unique_plugins_str
-    unique_plugins_str=$(echo "${DESIRED_PLUGINS[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+    # 使用正确填充的 current_desired_plugins 数组进行去重
+    unique_plugins_str=$(echo "${current_desired_plugins[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+    # !!! 移除下面这行错误的代码，它错误地使用了旧的 DESIRED_PLUGINS 数组 !!!
+    # unique_plugins_str=$(echo "${DESIRED_PLUGINS[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' ')
     # 转换为数组
     read -r -a UNIQUE_DESIRED_PLUGINS <<< "$unique_plugins_str"
 
 
     log INFO "期望启用的插件: ${UNIQUE_DESIRED_PLUGINS[*]}"
 
-    local plugins_line_found=false
     local temp_zshrc=$(mktemp)
+    local plugins_line_found_in_original=false
+    local current_plugins=() # 初始化为空数组
+    local added_plugins=()
+    local modified=false
 
-    # 逐行读取 .zshrc 文件
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        # 匹配 plugins=(...) 行
-        if [[ "$line" =~ ^\s*plugins=\((.*)\) ]]; then
-            plugins_line_found=true
-            local existing_plugins_str="${BASH_REMATCH[1]}"
-            # 移除可能存在的注释
-            existing_plugins_str=$(echo "$existing_plugins_str" | sed 's/#.*//')
-            # 按空格分割现有插件
-            read -r -a existing_plugins <<< "$existing_plugins_str"
+    # 尝试使用 grep 查找 plugins 行
+    local plugins_line
+    plugins_line=$(grep -E '^\s*plugins=\(' "$ZSHRC_FILE")
 
-            log INFO "找到现有的插件列表: ${existing_plugins[*]}"
-            local current_plugins=("${existing_plugins[@]}")
-            local added_plugins=()
-
-            # 添加缺失的期望插件
-            for plugin in "${UNIQUE_DESIRED_PLUGINS[@]}"; do
-                local found=false
-                for existing in "${current_plugins[@]}"; do
-                    if [[ "$plugin" == "$existing" ]]; then
-                        found=true
-                        break
-                    fi
-                done
-                if ! $found; then
-                    current_plugins+=("$plugin")
-                    added_plugins+=("$plugin")
-                fi
-            done
-
-            if [ ${#added_plugins[@]} -gt 0 ]; then
-                log INFO "添加以下新插件到列表: ${added_plugins[*]}"
-                local new_plugins_line="plugins=(${current_plugins[*]})"
-                echo "$new_plugins_line" >> "$temp_zshrc"
-            else
-                log INFO "插件列表已包含所有期望的插件，无需修改。"
-                echo "$line" >> "$temp_zshrc" # 保留原始行
-            fi
-        else
-            # 非插件行，直接写入临时文件
-            echo "$line" >> "$temp_zshrc"
-        fi
-    done < "$ZSHRC_FILE"
-
-    # 如果未找到 plugins=(...) 行，则在文件末尾添加
-    if ! $plugins_line_found; then
-        log WARN "未在 $ZSHRC_FILE 中找到 'plugins=(...)' 行。"
-        log INFO "在文件末尾添加新的插件列表: ${UNIQUE_DESIRED_PLUGINS[*]}"
-        echo -e "\n# Oh My Zsh 插件列表" >> "$temp_zshrc"
-        echo "plugins=(${UNIQUE_DESIRED_PLUGINS[*]})" >> "$temp_zshrc"
+    if [[ -n "$plugins_line" ]]; then
+        plugins_line_found_in_original=true
+        # 去掉 plugins=( 和 )，移除行尾注释，提取插件名称
+        local plugins_content
+        plugins_content=$(echo "$plugins_line" | sed -E 's/^\s*plugins=\(\s*(.*?)\s*\)\s*(#.*)?$/\1/')
+        # 按空格分割现有插件
+        IFS=' ' read -r -a current_plugins <<< "$plugins_content"
+        log INFO "找到现有的插件列表: ${current_plugins[*]}"
+    else
+        log WARN "未在 $ZSHRC_FILE 中找到有效的 'plugins=(...)' 行。"
+        current_plugins=() # 确保是空数组
     fi
 
-    # 用修改后的临时文件覆盖原始文件
-    if mv "$temp_zshrc" "$ZSHRC_FILE"; then
-        log INFO "插件配置成功更新到 $ZSHRC_FILE。"
-        chmod 644 "$ZSHRC_FILE" # 确保权限正确
-        return 0
+    # 添加缺失的期望插件
+    for plugin in "${UNIQUE_DESIRED_PLUGINS[@]}"; do
+        local found=false
+        for existing in "${current_plugins[@]}"; do
+            if [[ "$plugin" == "$existing" ]]; then
+                found=true
+                break
+            fi
+        done
+        if ! $found; then
+            current_plugins+=("$plugin")
+            added_plugins+=("$plugin")
+            modified=true # 标记需要修改
+        fi
+    done
+
+    # 如果插件列表有变动或原始文件中没有找到 plugins 行，则需要重写文件
+    if $modified || ! $plugins_line_found_in_original; then
+        if [ ${#added_plugins[@]} -gt 0 ]; then
+             log INFO "添加以下新插件到列表: ${added_plugins[*]}"
+        elif ! $plugins_line_found_in_original; then
+             log INFO "将在文件末尾添加新的插件列表。"
+        else
+             log INFO "插件列表无需添加新插件，但可能需要重新格式化或写入。"
+        fi
+
+        local new_plugins_line="plugins=(${current_plugins[*]})"
+        local processed=false # 标记是否已处理（替换或添加）plugins 行
+
+        # 逐行读取原文件，写入临时文件，并在适当位置替换或添加 plugins 行
+        while IFS= read -r line || [[ -n "$line" ]]; do
+            # 尝试匹配原始的 plugins 行（即使它格式不规范或有注释）
+            if $plugins_line_found_in_original && [[ "$line" == "$plugins_line" ]] && ! $processed; then
+                 echo "$new_plugins_line" >> "$temp_zshrc"
+                 processed=true
+            # 尝试匹配一个更通用的 plugins 行模式，以防原始行被其他方式修改过
+            elif [[ "$line" =~ ^\s*plugins=\( ]] && ! $processed; then
+                 echo "$new_plugins_line" >> "$temp_zshrc"
+                 processed=true
+            else
+                 # 写入其他行
+                 echo "$line" >> "$temp_zshrc"
+            fi
+        done < "$ZSHRC_FILE"
+
+        # 如果遍历完文件仍未处理（意味着原文件没有找到任何形式的 plugins 行）
+        if ! $processed; then
+             log INFO "在文件末尾添加新的插件列表: ${current_plugins[*]}"
+             echo -e "\n# Oh My Zsh 插件列表 (由脚本添加/更新)" >> "$temp_zshrc"
+             echo "$new_plugins_line" >> "$temp_zshrc"
+        fi
+
+        # 用修改后的临时文件覆盖原始文件
+        # 需要确保目标文件所有权正确
+        local mv_cmd="mv \"$temp_zshrc\" \"$ZSHRC_FILE\""
+        local chmod_cmd="chmod 644 \"$ZSHRC_FILE\""
+        local mv_success=false
+        if [ "$EUID" -eq 0 ] && [ -n "$ORIGINAL_USER" ]; then
+             # 先设置所有权再移动
+             run_command sudo chown "$ORIGINAL_USER:$ORIGINAL_USER" "$temp_zshrc" || log WARN "无法更改临时文件的所有权"
+             if run_command sudo runuser -l "$ORIGINAL_USER" -c "$mv_cmd"; then
+                 mv_success=true
+                 run_command sudo runuser -l "$ORIGINAL_USER" -c "$chmod_cmd" # 设置权限
+             fi
+        else
+             if run_command mv "$temp_zshrc" "$ZSHRC_FILE"; then
+                 mv_success=true
+                 run_command chmod 644 "$ZSHRC_FILE" # 设置权限
+             fi
+        fi
+
+        if $mv_success; then
+            log INFO "插件配置成功更新到 $ZSHRC_FILE。"
+        else
+            log ERROR "无法将插件更改写回 $ZSHRC_FILE！"
+            rm -f "$temp_zshrc" # 尝试清理临时文件
+            return 1
+        fi
     else
-        log ERROR "无法将更改写回 $ZSHRC_FILE！"
-        rm -f "$temp_zshrc" # 清理临时文件
-        return 1
+        log INFO "插件列表已包含所有期望的插件，且无需修改 $ZSHRC_FILE。"
+        rm -f "$temp_zshrc" # 清理未使用的临时文件
+        return 0
+    # 移除多余的 else 块
+    # else
+    #    log ERROR "无法将更改写回 $ZSHRC_FILE！"
+    #    rm -f "$temp_zshrc" # 清理临时文件
+    #    return 1
     fi
 }
 
@@ -263,9 +366,10 @@ configure_aliases_and_extras() {
 
 # 主配置函数
 run_configuration() {
-    log STEP "开始配置 Zsh 环境..."
+    log STEP "开始配置 Zsh 环境 (目标: $ZSHRC_FILE)..."
 
     # 备份 .zshrc
+    # backup_file 内部需要处理 sudo
     if ! backup_file "$ZSHRC_FILE"; then
         log ERROR "备份 $ZSHRC_FILE 失败！配置中止。"
         return 1
@@ -273,6 +377,19 @@ run_configuration() {
 
     # 备份 .p10k.zsh (如果存在)
     backup_file "$P10K_CONFIG_FILE"
+
+    # 确保 .zshrc 文件存在且所有权正确（如果 sudo）
+    if [ ! -f "$ZSHRC_FILE" ]; then
+        log INFO "$ZSHRC_FILE 不存在，将创建它。"
+        touch "$ZSHRC_FILE" || { log ERROR "创建 $ZSHRC_FILE 失败！"; return 1; }
+    fi
+    if [ "$EUID" -eq 0 ] && [ -n "$ORIGINAL_USER" ]; then
+        run_command sudo chown "$ORIGINAL_USER:$ORIGINAL_USER" "$ZSHRC_FILE" || log WARN "无法设置 $ZSHRC_FILE 的所有权"
+        if [ -f "$P10K_CONFIG_FILE" ]; then
+             run_command sudo chown "$ORIGINAL_USER:$ORIGINAL_USER" "$P10K_CONFIG_FILE" || log WARN "无法设置 $P10K_CONFIG_FILE 的所有权"
+        fi
+    fi
+
 
     local config_ok=true
 

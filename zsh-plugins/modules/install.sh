@@ -64,11 +64,25 @@ install_package_manager_pkgs() {
 # 安装 Oh My Zsh
 install_oh_my_zsh() {
     log STEP "安装 Oh My Zsh..."
-    local oh_my_zsh_dir="$HOME/.oh-my-zsh"
+    # 使用 USER_HOME
+    local oh_my_zsh_dir="${USER_HOME}/.oh-my-zsh"
 
     if [ -d "$oh_my_zsh_dir" ]; then
-        log INFO "Oh My Zsh 目录已存在，将尝试更新..."
-        if ZSH="$oh_my_zsh_dir" sh "$oh_my_zsh_dir/tools/upgrade.sh"; then
+        log INFO "Oh My Zsh 目录 '$oh_my_zsh_dir' 已存在，将尝试更新..."
+        # 更新操作需要在目标用户下执行
+        local update_cmd="ZSH=\"$oh_my_zsh_dir\" sh \"$oh_my_zsh_dir/tools/upgrade.sh\""
+        local update_success=false
+        if [ "$EUID" -eq 0 ] && [ -n "$ORIGINAL_USER" ]; then
+            if run_command sudo runuser -l "$ORIGINAL_USER" -c "$update_cmd"; then
+                update_success=true
+            fi
+        else
+            if ZSH="$oh_my_zsh_dir" sh "$oh_my_zsh_dir/tools/upgrade.sh"; then
+                update_success=true
+            fi
+        fi
+
+        if $update_success; then
              log INFO "Oh My Zsh 更新成功。"
         else
              log WARN "Oh My Zsh 更新失败。可能需要手动干预。"
@@ -77,9 +91,12 @@ install_oh_my_zsh() {
         # 注意：强制模式下，我们可能需要先删除旧目录
         # if [ "$INSTALL_MODE" == "force" ]; then
         #     log WARN "强制模式：正在删除旧的 Oh My Zsh 目录: $oh_my_zsh_dir"
-        #     if ! rm -rf "$oh_my_zsh_dir"; then
-        #         log ERROR "删除旧的 Oh My Zsh 目录失败！"
-        #         return 1
+        #     # 删除操作也需要考虑 sudo
+        #     local rm_cmd="rm -rf \"$oh_my_zsh_dir\""
+        #     if [ "$EUID" -eq 0 ]; then
+        #         if ! run_sudo_command $rm_cmd; then log ERROR "删除旧的 Oh My Zsh 目录失败！"; return 1; fi
+        #     else
+        #         if ! run_command $rm_cmd; then log ERROR "删除旧的 Oh My Zsh 目录失败！"; return 1; fi
         #     fi
         # else
              return 0 # 非强制模式下，存在即视为成功（或已尝试更新）
@@ -87,27 +104,58 @@ install_oh_my_zsh() {
     fi
 
     # 使用官方安装脚本安装
-    # 需要 curl 或 wget
+    log INFO "尝试使用官方脚本安装 Oh My Zsh 到 '$oh_my_zsh_dir'..."
+    local install_script_url="https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh"
+    local fetch_cmd=""
+
     if command_exists curl; then
-        if run_command sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended; then
-            log INFO "Oh My Zsh 安装成功 (使用 curl)。"
-            # 安装脚本可能会切换 shell，这里可能需要后续处理
-            # 安装脚本会自动备份 .zshrc，我们不需要手动备份
-            return 0
-        else
-            log ERROR "Oh My Zsh 安装失败 (使用 curl)。"
-            return 1
-        fi
+        fetch_cmd="curl -fsSL $install_script_url"
     elif command_exists wget; then
-         if run_command sh -c "$(wget -O- https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended; then
-            log INFO "Oh My Zsh 安装成功 (使用 wget)。"
-            return 0
-        else
-            log ERROR "Oh My Zsh 安装失败 (使用 wget)。"
-            return 1
-        fi
+        fetch_cmd="wget -O- $install_script_url"
     else
         log ERROR "未找到 curl 或 wget，无法下载 Oh My Zsh 安装脚本。"
+        return 1
+    fi
+
+    local script_content
+    script_content=$(eval "$fetch_cmd") # 获取脚本内容
+
+    if [ -z "$script_content" ]; then
+        log ERROR "无法下载 Oh My Zsh 安装脚本内容。"
+        return 1
+    fi
+
+    # 使用 runuser 或 sh -c 在目标用户下执行安装脚本
+    local install_success=false
+    local install_shell_cmd="ZSH=\"$oh_my_zsh_dir\" sh -s -- --unattended --keep-zshrc" # 使用 --keep-zshrc
+
+    if [ "$EUID" -eq 0 ] && [ -n "$ORIGINAL_USER" ]; then
+        log INFO "使用 'runuser -l $ORIGINAL_USER -c ...' 来为目标用户安装 Oh My Zsh"
+        if echo "$script_content" | run_command sudo runuser -l "$ORIGINAL_USER" -c "$install_shell_cmd"; then
+             install_success=true
+             log INFO "Oh My Zsh 安装命令已为用户 '$ORIGINAL_USER' 执行。"
+        else
+             log ERROR "为用户 '$ORIGINAL_USER' 执行 Oh My Zsh 安装命令失败。"
+        fi
+    else
+         # 普通用户直接运行
+         if echo "$script_content" | run_command sh -s -- --unattended --keep-zshrc; then
+            install_success=true
+            log INFO "Oh My Zsh 安装成功。"
+         else
+            log ERROR "Oh My Zsh 安装失败。"
+         fi
+    fi
+
+    # 验证安装
+    if $install_success; then
+        if [ ! -d "$oh_my_zsh_dir/.git" ]; then # 检查 .git 目录是否存在作为基本验证
+            log ERROR "Oh My Zsh 安装后验证失败 (目录 '$oh_my_zsh_dir' 不是 git 仓库)。"
+            return 1
+        fi
+        log INFO "Oh My Zsh 安装验证成功。"
+        return 0
+    else
         return 1
     fi
 }
@@ -118,35 +166,78 @@ install_oh_my_zsh() {
 install_omz_plugin() {
     local plugin_name="$1"
     local repo_url="$2"
-    local plugin_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/${plugin_name}"
+    # 使用 USER_HOME
+    local plugin_dir="${ZSH_CUSTOM:-${USER_HOME}/.oh-my-zsh/custom}/plugins/${plugin_name}"
+    local custom_plugins_dir
+    custom_plugins_dir=$(dirname "$plugin_dir")
 
-    log STEP "安装/更新 Oh My Zsh 插件: $plugin_name..."
+    log STEP "安装/更新 Oh My Zsh 插件: $plugin_name 到 $plugin_dir"
+
+    # 确保目标目录的所有权正确（如果以 sudo 运行）
+    if [ "$EUID" -eq 0 ] && [ -n "$ORIGINAL_USER" ]; then
+        # 确保 custom/plugins 目录存在且属于目标用户
+        run_command sudo mkdir -p "$custom_plugins_dir"
+        # chown 父目录 .oh-my-zsh/custom
+        run_command sudo chown -R "$ORIGINAL_USER:$ORIGINAL_USER" "$(dirname "$custom_plugins_dir")" || log WARN "无法更改 '$custom_plugins_dir' 父目录的所有权"
+    else
+         mkdir -p "$custom_plugins_dir" # 普通用户直接创建
+    fi
+
 
     if [ -d "$plugin_dir" ]; then
         log INFO "插件目录 '$plugin_dir' 已存在。"
         if [ "$INSTALL_MODE" == "force" ]; then
             log WARN "强制模式：正在删除旧的插件目录: $plugin_dir"
-            if ! rm -rf "$plugin_dir"; then
-                log ERROR "删除旧插件目录 '$plugin_dir' 失败！"
-                return 1
+            # 删除操作也可能需要 sudo
+            local rm_cmd="rm -rf \"$plugin_dir\""
+            if [ "$EUID" -eq 0 ]; then
+                if ! run_sudo_command $rm_cmd; then
+                    log ERROR "删除旧插件目录 '$plugin_dir' 失败！"
+                    return 1
+                fi
+            else
+                 if ! run_command $rm_cmd; then
+                    log ERROR "删除旧插件目录 '$plugin_dir' 失败！"
+                    return 1
+                fi
             fi
             # 删除后继续执行 git clone
         else
             log INFO "尝试更新插件 '$plugin_name'..."
-            if (cd "$plugin_dir" && git pull); then
+            # 更新操作需要在目标用户下执行
+            local update_cmd="cd \"$plugin_dir\" && git pull"
+            local update_success=false
+            if [ "$EUID" -eq 0 ] && [ -n "$ORIGINAL_USER" ]; then
+                 if run_command sudo runuser -l "$ORIGINAL_USER" -c "$update_cmd"; then
+                     update_success=true
+                 fi
+            else
+                 # 必须在子 shell 中执行 cd
+                 if (cd "$plugin_dir" && git pull); then
+                     update_success=true
+                 fi
+            fi
+
+            if $update_success; then
                  log INFO "插件 '$plugin_name' 更新成功。"
                  return 0
             else
                  log WARN "插件 '$plugin_name' 更新失败。可能需要手动干预。"
-                 # 可以选择删除并重新 clone
+                 # 如果更新失败，尝试删除并重新克隆
                  log WARN "尝试删除并重新克隆插件 '$plugin_name'..."
-                 if rm -rf "$plugin_dir"; then
-                     # 继续执行下面的 git clone
-                     : # Pass
+                 local rm_cmd="rm -rf \"$plugin_dir\""
+                 local clone_failed=false
+                 if [ "$EUID" -eq 0 ]; then
+                      if ! run_sudo_command $rm_cmd; then clone_failed=true; fi
                  else
-                     log ERROR "删除插件目录 '$plugin_dir' 失败！无法重新克隆。"
-                     return 1
+                      if ! run_command $rm_cmd; then clone_failed=true; fi
                  fi
+
+                 if $clone_failed; then
+                      log ERROR "删除插件目录 '$plugin_dir' 失败！无法重新克隆。"
+                      return 1
+                 fi
+                 # 继续执行下面的 git clone
             fi
         fi
     fi
@@ -154,14 +245,25 @@ install_omz_plugin() {
     # 如果目录不存在或已被删除，则克隆
     if [ ! -d "$plugin_dir" ]; then
         log INFO "克隆插件 '$plugin_name' 从 $repo_url 到 $plugin_dir"
-        # 确保 custom/plugins 目录存在
-        mkdir -p "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins"
-        if run_command git clone --depth=1 "$repo_url" "$plugin_dir"; then
-            log INFO "插件 '$plugin_name' 克隆成功。"
-            return 0
+        # 克隆操作需要在目标用户下执行
+        local clone_cmd="git clone --depth=1 \"$repo_url\" \"$plugin_dir\""
+        local clone_success=false
+        if [ "$EUID" -eq 0 ] && [ -n "$ORIGINAL_USER" ]; then
+             if run_command sudo runuser -l "$ORIGINAL_USER" -c "$clone_cmd"; then
+                 clone_success=true
+             fi
         else
-            log ERROR "插件 '$plugin_name' 克隆失败！"
-            return 1
+             if run_command git clone --depth=1 "$repo_url" "$plugin_dir"; then
+                 clone_success=true
+             fi
+        fi
+
+        if $clone_success; then
+             log INFO "插件 '$plugin_name' 克隆成功。"
+             return 0
+        else
+             log ERROR "插件 '$plugin_name' 克隆失败！"
+             return 1
         fi
     fi
      return 0 # 如果更新成功或无需操作
@@ -171,47 +273,92 @@ install_omz_plugin() {
 install_powerlevel10k() {
     local theme_name="powerlevel10k"
     local repo_url="https://github.com/romkatv/powerlevel10k.git"
-    local theme_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/${theme_name}"
+    # 使用 USER_HOME
+    local theme_dir="${ZSH_CUSTOM:-${USER_HOME}/.oh-my-zsh/custom}/themes/${theme_name}"
+    local custom_themes_dir
+    custom_themes_dir=$(dirname "$theme_dir")
 
     log STEP "安装/更新 Powerlevel10k 主题..."
+
+     # 确保目标目录的所有权正确（如果以 sudo 运行）
+    if [ "$EUID" -eq 0 ] && [ -n "$ORIGINAL_USER" ]; then
+        run_command sudo mkdir -p "$custom_themes_dir"
+        run_command sudo chown -R "$ORIGINAL_USER:$ORIGINAL_USER" "$(dirname "$custom_themes_dir")" || log WARN "无法更改 '$custom_themes_dir' 父目录的所有权"
+    else
+         mkdir -p "$custom_themes_dir"
+    fi
 
     if [ -d "$theme_dir" ]; then
         log INFO "主题目录 '$theme_dir' 已存在。"
          if [ "$INSTALL_MODE" == "force" ]; then
             log WARN "强制模式：正在删除旧的主题目录: $theme_dir"
-            if ! rm -rf "$theme_dir"; then
-                log ERROR "删除旧主题目录 '$theme_dir' 失败！"
-                return 1
-            fi
+            local rm_cmd="rm -rf \"$theme_dir\""
+             if [ "$EUID" -eq 0 ]; then
+                 if ! run_sudo_command $rm_cmd; then
+                     log ERROR "删除旧主题目录 '$theme_dir' 失败！"
+                     return 1
+                 fi
+             else
+                 if ! run_command $rm_cmd; then
+                     log ERROR "删除旧主题目录 '$theme_dir' 失败！"
+                     return 1
+                 fi
+             fi
          else
              log INFO "尝试更新主题 '$theme_name'..."
-             if (cd "$theme_dir" && git pull); then
+             local update_cmd="cd \"$theme_dir\" && git pull"
+             local update_success=false
+             if [ "$EUID" -eq 0 ] && [ -n "$ORIGINAL_USER" ]; then
+                 if run_command sudo runuser -l "$ORIGINAL_USER" -c "$update_cmd"; then update_success=true; fi
+             else
+                 if (cd "$theme_dir" && git pull); then update_success=true; fi
+             fi
+
+             if $update_success; then
                  log INFO "主题 '$theme_name' 更新成功。"
                  return 0
              else
                  log WARN "主题 '$theme_name' 更新失败。可能需要手动干预。"
                  log WARN "尝试删除并重新克隆主题 '$theme_name'..."
-                 if rm -rf "$theme_dir"; then
-                     : # Pass
+                 local rm_cmd="rm -rf \"$theme_dir\""
+                 local clone_failed=false
+                 if [ "$EUID" -eq 0 ]; then
+                     if ! run_sudo_command $rm_cmd; then clone_failed=true; fi
                  else
+                     if ! run_command $rm_cmd; then clone_failed=true; fi
+                 fi
+                 if $clone_failed; then
                      log ERROR "删除主题目录 '$theme_dir' 失败！无法重新克隆。"
                      return 1
                  fi
+                 # 继续执行下面的 git clone
              fi
          fi
     fi
 
     if [ ! -d "$theme_dir" ]; then
         log INFO "克隆主题 '$theme_name' 从 $repo_url 到 $theme_dir"
-        mkdir -p "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes"
-        # Powerlevel10k 推荐克隆完整历史记录，而不是 --depth=1
-        if run_command git clone "$repo_url" "$theme_dir"; then
-            log INFO "主题 '$theme_name' 克隆成功。"
-            return 0
-        else
-            log ERROR "主题 '$theme_name' 克隆失败！"
-            return 1
-        fi
+        # 克隆操作需要在目标用户下执行
+        # Powerlevel10k 推荐克隆完整历史记录
+        local clone_cmd="git clone \"$repo_url\" \"$theme_dir\""
+        local clone_success=false
+         if [ "$EUID" -eq 0 ] && [ -n "$ORIGINAL_USER" ]; then
+             if run_command sudo runuser -l "$ORIGINAL_USER" -c "$clone_cmd"; then
+                 clone_success=true
+             fi
+         else
+             if run_command git clone "$repo_url" "$theme_dir"; then
+                 clone_success=true
+             fi
+         fi
+
+         if $clone_success; then
+             log INFO "主题 '$theme_name' 克隆成功。"
+             return 0
+         else
+             log ERROR "主题 '$theme_name' 克隆失败！"
+             return 1
+         fi
     fi
     return 0
 }
@@ -222,6 +369,7 @@ install_fonts() {
     if [ -f "$FONTS_PATH" ]; then
         # shellcheck source=./fonts.sh
         source "$FONTS_PATH"
+        # fonts.sh 内部需要处理 sudo 和 USER_HOME
         if install_meslolgs_fonts; then
             log INFO "字体安装/检查完成。"
             return 0
@@ -338,10 +486,11 @@ run_installation() {
         fi
         # Oh My Zsh 安装后，ZSH_CUSTOM 环境变量可能在当前脚本实例中未设置
         # 手动设置一个默认值以防万一
-        export ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
+        # 使用 USER_HOME
+        export ZSH_CUSTOM="${ZSH_CUSTOM:-${USER_HOME}/.oh-my-zsh/custom}"
         log INFO "设置 ZSH_CUSTOM 为: $ZSH_CUSTOM"
 
-    elif ! command_exists omz &> /dev/null && ! [ -d "$HOME/.oh-my-zsh" ]; then
+    elif ! command_exists omz &> /dev/null && ! [ -d "${USER_HOME}/.oh-my-zsh" ]; then
          # 如果不安装 OMZ，但检查发现它不存在，则无法安装插件
          log WARN "Oh My Zsh 未安装且未选择安装，将跳过所有 Oh My Zsh 插件和主题的安装。"
          install_syntax_highlighting=false
@@ -351,7 +500,8 @@ run_installation() {
     else
          log INFO "跳过 Oh My Zsh 安装步骤。"
          # 确保 ZSH_CUSTOM 已设置
-         export ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
+         # 使用 USER_HOME
+         export ZSH_CUSTOM="${ZSH_CUSTOM:-${USER_HOME}/.oh-my-zsh/custom}"
     fi
 
     # 步骤 3: 安装插件 (需要 Oh My Zsh)
@@ -396,6 +546,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     # --- 用于测试 ---
     echo "直接运行 install.sh 进行测试..."
     # 手动设置环境变量进行测试
+    export USER_HOME="$HOME" # 假设直接运行
+    export ORIGINAL_USER="$USER"
     export INSTALL_MODE="missing" # 或者 "force"
     export PACKAGE_MANAGER=$(detect_package_manager)
     # 模拟 check.sh 的导出

@@ -40,8 +40,9 @@ SOFTWARE_CHECKS=(
 # Sourcing check.sh should provide them if it's written correctly.
 source "$CHECK_PATH"
 
-
-ZSHRC_FILE="$HOME/.zshrc"
+# 使用 USER_HOME 定义配置文件路径
+ZSHRC_FILE="${USER_HOME}/.zshrc"
+P10K_CONFIG_FILE="${USER_HOME}/.p10k.zsh" # 虽然不直接修改，但检查时可能用到
 
 # 验证安装和配置状态
 verify_installation() {
@@ -101,10 +102,28 @@ verify_installation() {
                     [[ "$plugin" == "fzf" && "${VERIFICATION_RESULTS[fzf]}" == "已安装" ]] || \
                     [[ "$plugin" == "fzf-tab" && "${VERIFICATION_RESULTS[fzf-tab]}" == "已安装" ]] ; then
 
-                     if ! echo "$plugins_line" | grep -q " ${plugin} "; then
-                         log WARN "插件 '$plugin' 已安装但未在 .zshrc 的 plugins=() 中启用。"
+                     # --- 更可靠的插件检查 ---
+                     # 1. 提取括号内的内容
+                     local plugins_content
+                     plugins_content=$(echo "$plugins_line" | sed -E 's/^\s*plugins=\(\s*(.*?)\s*\)\s*(#.*)?$/\1/')
+                     # 2. 将内容读入数组
+                     local enabled_plugins_array=()
+                     IFS=' ' read -r -a enabled_plugins_array <<< "$plugins_content"
+                     # 3. 检查插件是否存在于数组中
+                     local plugin_found_in_rc=false
+                     for enabled_plugin in "${enabled_plugins_array[@]}"; do
+                         if [[ "$plugin" == "$enabled_plugin" ]]; then
+                             plugin_found_in_rc=true
+                             break
+                         fi
+                     done
+
+                     if ! $plugin_found_in_rc; then
+                         log WARN "插件 '$plugin' 已安装但似乎未在 .zshrc 的 plugins=(...) 数组中启用。"
                          missing_rc_plugins+=("$plugin")
                          zshrc_ok=false
+                     # else
+                         # log INFO "插件 '$plugin' 已在 .zshrc 中启用。" # 可选的成功日志
                      fi
                  fi
              done
@@ -206,10 +225,10 @@ provide_guidance() {
     fi
     echo ""
 
-    log INFO "4. 检查 .zshrc:"
+    log INFO "4. 检查配置文件:"
     log INFO "   您可以检查 '$ZSHRC_FILE' 文件以查看所做的更改。备份文件位于 '${ZSHRC_FILE}.backup_...'。"
-    if [ -f "$HOME/.p10k.zsh" ]; then
-        log INFO "   Powerlevel10k 的配置文件位于 '$HOME/.p10k.zsh'。"
+    if [ -f "$P10K_CONFIG_FILE" ]; then
+        log INFO "   Powerlevel10k 的配置文件位于 '$P10K_CONFIG_FILE'。"
     fi
     echo ""
 
@@ -239,7 +258,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo 'ZSH_THEME="powerlevel10k/powerlevel10k"' > ~/.zshrc
     echo 'plugins=(git zsh-syntax-highlighting zsh-autosuggestions fzf fzf-tab)' >> ~/.zshrc
     echo "alias ls='eza'" >> ~/.zshrc
-    echo "alias cat='bat'" >> ~/.zshrc
+    echo "alias cat='bat'" >> "$ZSHRC_FILE" # Use variable
 
     run_post_install_checks
     # --- 测试结束 ---

@@ -36,13 +36,10 @@ log() {
             console_message="${color_error}[${timestamp}] [ERROR] ${message}${color_reset}"
             ;;
         STEP)
+            # STEP 级别递增全局计数器
+            ((GLOBAL_STEP_COUNTER++))
             # STEP 级别在控制台添加换行以突出显示
-            # 检查全局步骤计数器是否存在
-            if [[ -n "$CURRENT_STEP" && -n "$TOTAL_STEPS" ]]; then
-                 console_message="\n${color_step}>>> [STEP ${CURRENT_STEP}/${TOTAL_STEPS}] ${message}${color_reset}\n"
-            else
-                 console_message="\n${color_step}>>> [STEP] ${message}${color_reset}\n"
-            fi
+            console_message="\n${color_step}>>> [STEP ${GLOBAL_STEP_COUNTER}] ${message}${color_reset}\n"
             ;;
         *)
             console_message="[${timestamp}] ${message}" # 无级别或未知级别
@@ -64,11 +61,7 @@ log() {
              ;;
         STEP)
              # 文件日志也包含步骤编号
-             if [[ -n "$CURRENT_STEP" && -n "$TOTAL_STEPS" ]]; then
-                 file_message="[${timestamp}] [STEP ${CURRENT_STEP}/${TOTAL_STEPS}] ${message}"
-             else
-                 file_message="[${timestamp}] [STEP] ${message}"
-             fi
+             file_message="[${timestamp}] [STEP ${GLOBAL_STEP_COUNTER}] ${message}"
              ;;
         *)
              file_message="[${timestamp}] ${message}"
@@ -189,13 +182,15 @@ prompt_choice() {
 # 参数: $1: 插件名称 (例如 zsh-syntax-highlighting)
 is_omz_plugin_installed() {
     local plugin_name="$1"
-    local plugin_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/${plugin_name}"
+    # 使用 USER_HOME
+    local plugin_dir="${ZSH_CUSTOM:-${USER_HOME}/.oh-my-zsh/custom}/plugins/${plugin_name}"
     [ -d "$plugin_dir" ] && [ -n "$(ls -A "$plugin_dir")" ]
 }
 
 # 检查 Powerlevel10k 主题是否存在
 is_p10k_theme_installed() {
-    local theme_dir="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/themes/powerlevel10k"
+    # 使用 USER_HOME
+    local theme_dir="${ZSH_CUSTOM:-${USER_HOME}/.oh-my-zsh/custom}/themes/powerlevel10k"
     [ -d "$theme_dir" ] && [ -f "${theme_dir}/powerlevel10k.zsh-theme" ]
 }
 
@@ -205,13 +200,14 @@ is_p10k_theme_installed() {
 is_font_installed_heuristic() {
     local font_pattern="$1"
     # 检查 Linux/macOS 的常见字体目录
+    # 使用 USER_HOME
     local font_dirs=(
-        "$HOME/.local/share/fonts"
-        "$HOME/.fonts"
+        "${USER_HOME}/.local/share/fonts"
+        "${USER_HOME}/.fonts"
         "/usr/local/share/fonts"
         "/usr/share/fonts"
         "/Library/Fonts" # macOS 系统字体
-        "$HOME/Library/Fonts" # macOS 用户字体
+        "${USER_HOME}/Library/Fonts" # macOS 用户字体
     )
     for dir in "${font_dirs[@]}"; do
         if [ -d "$dir" ]; then
