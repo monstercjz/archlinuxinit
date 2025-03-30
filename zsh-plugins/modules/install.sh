@@ -69,6 +69,17 @@ install_oh_my_zsh() {
 
     if [ -d "$oh_my_zsh_dir" ]; then
         log INFO "Oh My Zsh 目录 '$oh_my_zsh_dir' 已存在，将尝试更新..."
+        # 此处备份为后期手动添加
+        log INFO "更新之前先备份.zshrc文件"
+        if [ -f "${USER_HOME}/.zshrc" ]; then
+            local backup_file="${USER_HOME}/.zshrc.backup.byohmyzshinstall.$(date +'%Y%m%d_%H%M%S')"
+            log INFO "备份当前 .zshrc 文件到: $backup_file"
+            if ! run_command cp "${USER_HOME}/.zshrc" "$backup_file"; then
+                log ERROR "备份 .zshrc 文件失败！"
+            fi
+        else
+            log ERROR "未找到 .zshrc 文件，无法备份。"
+        fi
         # 更新操作需要在目标用户下执行
         local update_cmd="ZSH=\"$oh_my_zsh_dir\" sh \"$oh_my_zsh_dir/tools/upgrade.sh\""
         local update_success=false
@@ -105,6 +116,17 @@ install_oh_my_zsh() {
 
     # 使用官方安装脚本安装
     log INFO "尝试使用官方脚本安装 Oh My Zsh 到 '$oh_my_zsh_dir'..."
+    # 此处备份为后期手动添加
+    log INFO "安装之前先备份.zshrc文件"
+        if [ -f "${USER_HOME}/.zshrc" ]; then
+            local backup_file="${USER_HOME}/.zshrc.backup.byohmyzshinstall.$(date +'%Y%m%d_%H%M%S')"
+            log INFO "备份当前 .zshrc 文件到: $backup_file"
+            if ! run_command cp "${USER_HOME}/.zshrc" "$backup_file"; then
+                log ERROR "备份 .zshrc 文件失败！"
+            fi
+        else
+            log ERROR "未找到 .zshrc 文件，无法备份。"
+        fi
     local install_script_url="https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh"
     local fetch_cmd=""
 
