@@ -75,5 +75,4 @@ manage_zsh() {
 
 }
 
-
 # 执行示例：manage_zsh "install"

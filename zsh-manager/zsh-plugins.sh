@@ -87,26 +87,28 @@ confirm_action() {
   fi
 }
 
-system_config_menu() {
+zsh_config_menu() {
   echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-  echo -e "${COLOR_BLUE}系统基础配置菜单${COLOR_RESET}"
+  echo -e "${COLOR_BLUE}zhs及插件安装管理菜单${COLOR_RESET}"
   echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}1. 换源${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}2. 设置窗口权限${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}3. sudo 权限强化(免密)${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}4. 网络地址设定${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}5. 获取用户手动安装软件包信息${COLOR_RESET}"
-  echo -e "${COLOR_YELLOW}6. 系统信息收集${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}1. 安装zsh${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}2. 安装oh my zsh${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}3. 安装fzf${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}4. 安装p10k${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}5. 安装其他插件${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}6. 安装字体${COLOR_RESET}"
+  echo -e "${COLOR_YELLOW}7. 管理备份${COLOR_RESET}"
   echo -e "${COLOR_BLUE}9. 清屏${COLOR_RESET}"
   echo -e "${COLOR_RED}0. 返回主菜单${COLOR_RESET}"
   read -p "请选择菜单: " choice
   case $choice in
-    1) install_software mirrors ;;
-    2) install_software permissions ;;
-    3) install_software sudo ;;
-    4) install_software network ;;
-    5) install_software package_stats ;;
-    6) install_software archlinux_system_analysis_2.0 ;;
+    1) install_software zsh ;;
+    2) install_software omz ;;
+    3) install_software install_fzf ;;
+    4) install_software p10k ;;
+    5) install_software plugins ;;
+    6) install_software font.0 ;;
+    7) install_software backup ;;
     9) clear_screen ;;
     0) exit 0 ;; # 返回主菜单
     *) wait_right_choice ;;
@@ -114,22 +116,22 @@ system_config_menu() {
 }
 clear_screen() {
   clear
-  system_config_menu
+  zsh_config_menu
 }
 wait_right_choice() {
   echo -e "${COLOR_RED}无效选择，返回当前菜单继续等待选择${COLOR_RESET}"
-  system_config_menu
+  zsh_config_menu
 }
 install_software() {
   local software="$1"
   if confirm_action; then
-    if bash system-config/modules/"$software".sh; then
+    if bash zsh-manager/modules/"$software".sh; then
       log "INFO" "已经结束 $software 相关动作，返回系统基础配置菜单成功"
     else
       log "ERROR" "打开界面 $software 失败"
     fi
   fi
-  system_config_menu
+  zsh_config_menu
 }
 
 
@@ -138,4 +140,4 @@ ensure_log_dir
 ensure_log_file
 
 # 启动系统配置菜单
-system_config_menu
+zsh_config_menu
