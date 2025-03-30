@@ -283,10 +283,11 @@ show_package_stats() {
     
     # 创建保存目录
     echo -e "${BLUE}正在准备保存目录...${NC}"
-    save_dir="$HOME/arch-linux-init/info-logs"
+    #save_dir="$HOME/arch-linux-init/info-logs"
+    save_dir="/var/log/arch-init/info-logs"
     if [ ! -d "$save_dir" ]; then
         echo -e "${YELLOW}创建保存目录: $save_dir${NC}"
-        mkdir -p "$save_dir"
+        sudo mkdir -p "$save_dir"
     else
         echo -e "${GREEN}保存目录已存在: $save_dir${NC}"
     fi
@@ -443,8 +444,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     show_package_stats
     
     echo -e "\n${CYAN}========== 使用提示 ===========${NC}"
-    echo -e "${BLUE}1. 统计结果已保存到 $HOME/arch-linux-init/info-logs 目录${NC}"
-    echo -e "${BLUE}2. 软件包名称列表也已保存到 $HOME/arch-linux-init/info-logs 目录${NC}"
+    echo -e "${BLUE}1. 统计结果已保存到 /var/log/arch-init/info-logs 目录${NC}"
+    echo -e "${BLUE}2. 软件包名称列表也已保存到 /var/log/arch-init/info-logs 目录${NC}"
     echo -e "${BLUE}3. 您可以使用此列表在新系统上一键安装所有软件包:${NC}"
     echo -e "${CYAN}   sudo pacman -S --needed - < $manual_list_file${NC}"
     echo -e "${CYAN}===================================${NC}"

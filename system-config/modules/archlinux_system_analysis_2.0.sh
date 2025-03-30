@@ -563,10 +563,11 @@ show_system_info() {
     
     # 生成保存文件名（使用日期时间作为文件名的一部分）
     echo -e "${BLUE}正在准备保存系统信息...${NC}"
-    save_dir="$HOME/arch-linux-init/info-logs"
+    #save_dir="$HOME/arch-linux-init/info-logs"
+    save_dir="/var/log/arch-init/info-logs"
     if [ ! -d "$save_dir" ]; then
         echo -e "${YELLOW}创建保存目录: $save_dir${NC}"
-        mkdir -p "$save_dir"
+        sudo mkdir -p "$save_dir"
     else
         echo -e "${GREEN}保存目录已存在: $save_dir${NC}"
     fi
