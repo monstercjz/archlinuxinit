@@ -11,7 +11,7 @@ FONT_NAME="MesloLGS NF"
 
 FONT_URL="https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20Regular.ttf"
 
-FONT_DIR="$HOME/.local/share/fonts"
+FONT_DIR="/usr/share/fonts"
 
 
 manage_fonts() {
@@ -37,16 +37,18 @@ manage_fonts() {
                     return 0
                 else
                     # 如果用户选择重新安装，先删除现有安装
-                    rm -f "$FONT_DIR"/MesloLGS*
+                    sudo rm -f "$FONT_DIR"/MesloLGS*
                     show_status "info" "已删除现有安装，准备重新安装"
                 fi
             }
 
             
 
-            mkdir -p "$FONT_DIR"
+            # mkdir -p "$FONT_DIR"
 
-            wget -qO "$FONT_DIR/MesloLGS NF Regular.ttf" "$FONT_URL" && \
+            # wget -qO "$FONT_DIR/MesloLGS NF Regular.ttf" "$FONT_URL" && \
+            wget https://github.com/romkatv/powerlevel10k-media/raw/master/MesloLGS%20NF%20Regular.ttf
+            sudo mv MesloLGS*.ttf /usr/share/fonts/
 
             fc-cache -f -v && \
 
