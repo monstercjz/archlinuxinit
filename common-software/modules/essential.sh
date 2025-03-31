@@ -218,7 +218,7 @@ install_software() {
 
 install_vscode() {
   echo "正在安装 VSCode..."
-  install_software "code"
+  install_software "visual-studio-code-bin"
   ESSENTIAL_SOFTWARE_MENU
 }
 
