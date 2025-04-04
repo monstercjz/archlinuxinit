@@ -47,7 +47,8 @@ install_package_manager_pkgs() {
     update_cmd=$(get_update_command "$pm")
     if [[ "$pm" == "apt" || "$pm" == "dnf" || "$pm" == "yum" ]] && [ -n "$update_cmd" ]; then
         log INFO "更新包列表..."
-        if ! run_sudo_command $update_cmd; then
+        # if ! run_sudo_command $update_cmd; then
+        if ! $update_cmd; then
             log WARN "包列表更新失败，但仍尝试继续安装。"
         fi
     fi

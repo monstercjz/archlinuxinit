@@ -345,6 +345,31 @@ configure_aliases_and_extras() {
          # 例如: source /path/to/fzf/shell/key-bindings.zsh
     fi
 
+    # 检查 fzf-tab 是否安装并添加 zstyle 配置
+    if is_omz_plugin_installed "fzf-tab"; then
+        log INFO "检测到 fzf-tab 插件已安装，检查其 zstyle 配置..."
+        local fzf_tab_config_block="# fzf-tab configuration (added by script)
+zstyle ':fzf-tab:*' fzf-flags --height=60% --border --color=bg+:#363a4f,bg:#24273a,spinner:#f4dbd6,hl:#ed8796 \\
+    --color=fg:#cad3f5,header:#ed8796,info:#c6a0f6,pointer:#f4dbd6 \\
+    --color=marker:#f4dbd6,fg+:#cad3f5,prompt:#c6a0f6,hl+:#ed8796
+
+zstyle ':fzf-tab:complete:*:*' fzf-preview '
+  (bat --color=always --line-range :500 \${realpath} 2>/dev/null ||
+   exa -al --git --icons \${realpath} ||
+   ls -lAh --color=always \${realpath}) 2>/dev/null'
+# End fzf-tab configuration"
+
+        # 检查配置块是否已存在 (检查第一行特征即可)
+        if ! grep -qF "zstyle ':fzf-tab:*' fzf-flags" "$temp_zshrc"; then
+            log INFO "添加 fzf-tab 的 zstyle 配置..."
+            echo -e "\n${fzf_tab_config_block}" >> "$temp_zshrc"
+            changes_made=true
+        else
+            log INFO "fzf-tab 的 zstyle 配置似乎已存在。"
+        fi
+    fi
+
+
     # 如果做了修改，则替换原文件
     if $changes_made; then
         if mv "$temp_zshrc" "$ZSHRC_FILE"; then

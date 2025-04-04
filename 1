@@ -1,0 +1,194 @@
+#!/bin/bash
+
+# 核心备份函数
+# 参数:
+# $1: backup_type (string, e.g., "home", "custom", "system") - 用于日志和恢复点
+# $2: source_paths (string, space-separated absolute paths)
+# $3: destination_base (string, e.g., "${BACKUP_DIR}/home")
+# $4: rsync_base_options (string, e.g., "-aAX --delete")
+# $5: exclude_params (string, formatted --exclude options)
+# $6: diff_params (string, formatted --link-dest option)
+# $7: use_sudo (string, "true" or "false")
+# $8: use_relative (string, "true" or "false" for -R option)
+# $9: retry_mode (string, "none", "all", "critical")
+# $10: critical_list (string, space-separated items relative to source base, only if retry_mode is "critical")
+# $11: progress_bar (string, "true" or "false")
+# $12: log_prefix (string, e.g., "用户配置")
+# $13: source_base_for_critical (string, e.g., "$REAL_HOME" for home, "/" for custom/system, only if retry_mode is "critical")
+#
+# 返回值:
+#   JSON string: {"success_count": X, "fail_count": Y, "critical_fail": true/false}
+perform_backup_core() {
+    local backup_type="$1"
+    local source_paths_str="$2"
+    local destination_base="$3"
+    local rsync_base_options="$4"
+    local exclude_params="$5"
+    local diff_params="$6"
+    local use_sudo="$7"
+    local use_relative="$8"
+    local retry_mode="$9"
+    local critical_list_str="${10}"
+    local progress_bar="${11}"
+    local log_prefix="${12}"
+    local source_base_for_critical="${13}" # Still needed for relative path calculation if critical mode used
+
+    local success_count=0
+    local fail_count=0
+    local critical_fail=false
+    local rsync_cmd_base="rsync"
+    local rsync_options="$rsync_base_options"
+    local final_dest="$destination_base" # Default destination
+
+    # --- 参数处理 ---
+    if [ "$use_sudo" == "true" ]; then
+        rsync_cmd_base="sudo rsync"
+    fi
+
+    if [ "$use_relative" == "true" ]; then
+        rsync_options="$rsync_options -R"
+        # When using -R, the destination is the base directory
+        final_dest="$destination_base"
+    fi
+
+    # 将字符串分割成数组
+    IFS=' ' read -r -a source_paths <<< "$source_paths_str"
+    IFS=' ' read -r -a critical_list <<< "$critical_list_str"
+
+    if [ ${#source_paths[@]} -eq 0 ]; then
+        log "WARN" "[$log_prefix] 没有需要备份的源路径。"
+        echo "{\"success_count\": 0, \"fail_count\": 0, \"critical_fail\": false}"
+        return 0 # Not an error, just nothing to do
+    fi
+
+    log "INFO" "[$log_prefix] 开始处理 ${#source_paths[@]} 个源路径..."
+
+    # --- 循环处理每个源路径 ---
+    for src_path in "${source_paths[@]}"; do
+        if [ ! -e "$src_path" ]; then
+            log "WARN" "[$log_prefix] 源路径不存在，跳过: $src_path"
+            fail_count=$((fail_count + 1))
+            continue
+        fi
+
+        # 检查权限 (仅在非sudo模式下有意义地警告)
+        if [ "$use_sudo" == "false" ] && [ ! -r "$src_path" ]; then
+             log "WARN" "[$log_prefix] 源路径不可读: $src_path"
+             # 继续尝试备份，rsync可能会失败
+        fi
+
+        # --- 确定目标路径和是否关键 ---
+        local current_dest_path="$final_dest" # Base destination if using -R
+        local check_dest_path="" # Path used for integrity check
+
+        if [ "$use_relative" == "true" ]; then
+            # For -R, check path is relative to destination_base
+            local relative_path="${src_path#${source_base_for_critical}}" # Remove base like / or /home/user
+            relative_path="${relative_path#/}" # Ensure no leading slash
+            check_dest_path="${destination_base}/${relative_path}"
+        else
+            # Not using -R, destination includes the basename
+            local base_name=$(basename "$src_path")
+            current_dest_path="${destination_base}/${base_name}"
+            check_dest_path="$current_dest_path"
+            # Ensure parent directory exists when not using -R
+             mkdir -p "$(dirname "$current_dest_path")"
+        fi
+        # 检查是否需要重试以及是否为关键配置
+        local attempt_retry=false
+        local is_critical=false # Assume not critical unless determined otherwise
+
+        if [ "$retry_mode" == "all" ]; then
+            attempt_retry=true
+        elif [ "$retry_mode" == "critical" ]; then
+             # 获取相对于 source_base_for_critical 的路径用于比较
+            local path_relative_to_base="${src_path#${source_base_for_critical}}"
+            path_relative_to_base="${path_relative_to_base#/}" # 移除可能的前导斜杠
+            for critical_item in "${critical_list[@]}"; do
+                 # 检查是否以 critical_item 开头 (允许目录匹配)
+                if [[ "$path_relative_to_base" == "$critical_item"* ]]; then
+                    is_critical=true
+                    attempt_retry=true # It's critical, so attempt retry
+                    break
+                fi
+            done
+        fi
+        # If retry_mode is "none", attempt_retry remains false
+
+        # --- 构建并执行 rsync 命令 ---
+        local rsync_cmd
+        local progress_opts=""
+        if [ "$progress_bar" == "true" ]; then
+            # TODO: Implement pv progress bar if needed, requires more complex piping
+            # For now, use rsync's progress
+             log "INFO" "[$log_prefix] 使用 rsync 内置进度显示: $src_path"
+             progress_opts="--info=progress2" # Use --info=progress2 for less verbose output than --progress
+             rsync_options_final="$rsync_options $progress_opts" # Add v for verbose file list if needed
+        else
+             rsync_options_final="$rsync_options" # No progress
+        fi
+
+        # Construct the final command string, carefully quoting paths
+        if [ "$use_relative" == "true" ]; then
+             # Source path is the item, destination is the base dir
+             rsync_cmd="$rsync_cmd_base $rsync_options_final $exclude_params $diff_params \"$src_path\" \"$final_dest\" >> \"$LOG_FILE\" 2>&1"
+        else
+             # Source path is the item, destination is calculated path including basename
+             rsync_cmd="$rsync_cmd_base $rsync_options_final $exclude_params $diff_params \"$src_path\" \"$current_dest_path\" >> \"$LOG_FILE\" 2>&1"
+        fi
+
+
+        log "DEBUG" "[$log_prefix] 执行命令: $rsync_cmd" # Log the command for debugging
+
+        # --- 执行并处理结果 ---
+        local backup_success=false
+        if $attempt_retry ; then
+            local retry_log_prefix="[$log_prefix]"
+            if $is_critical; then
+                retry_log_prefix+=" 关键项"
+            fi
+            log "INFO" "$retry_log_prefix 尝试备份 (带重试): $src_path"
+            # Assuming exec_with_retry exists and is sourced
+            if exec_with_retry "$rsync_cmd" "$retry_log_prefix 备份: $src_path"; then
+                backup_success=true
+            elif $is_critical; then
+                # Only mark critical_fail if retry was attempted AND it was a critical item that failed
+                critical_fail=true
+            fi
+        else
+            # Execute directly without retry wrapper
+            log "INFO" "[$log_prefix] 尝试备份 (无重试): $src_path"
+            eval "$rsync_cmd" # Use eval carefully, ensure paths are quoted
+            if [ $? -eq 0 ]; then
+                 backup_success=true
+            fi
+        fi
+
+        # --- 记录和验证 ---
+        if $backup_success; then
+            log "INFO" "[$log_prefix] 已备份: $src_path"
+            success_count=$((success_count + 1))
+            # 验证备份完整性
+            if [ -e "$check_dest_path" ]; then
+                 # Assuming check_file_integrity exists and is sourced
+                 check_file_integrity "$check_dest_path" "[$log_prefix] $src_path"
+            else
+                 log "WARN" "[$log_prefix] 备份后目标路径未找到，无法验证: $check_dest_path"
+            fi
+        else
+            if $is_critical; then # Already logged by exec_with_retry if critical
+                 log "ERROR" "[$log_prefix] 关键项备份失败: $src_path"
+            else
+                 log "WARN" "[$log_prefix] 备份失败: $src_path"
+            fi
+            fail_count=$((fail_count + 1))
+        fi
+    done # End loop through source_paths
+
+    # --- 返回 JSON 结果 ---
+    echo "{\"success_count\": $success_count, \"fail_count\": $fail_count, \"critical_fail\": $critical_fail}"
+    return 0 # Function itself succeeded in running
+}
+
+# Make function available to sourcing scripts
+export -f perform_backup_core
