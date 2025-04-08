@@ -1,0 +1,27 @@
+# 验证系统配置示例
+# 将这些配置添加到 arch-backup.conf 文件中
+
+# ---------------验证选项---------------
+# 是否验证备份 (true/false)
+# 设置为true时，将在备份完成后执行验证
+VERIFY_BACKUP=true
+
+# 是否验证恢复点 (true/false)
+# 设置为true时，将验证恢复点的有效性
+VERIFY_RECOVERY_POINT=true
+
+# 验证报告保留天数
+# 超过此天数的验证报告将被自动清理
+VERIFY_REPORT_RETENTION_DAYS=30
+
+# 验证抽样比例 (0-100)
+# 对于大型备份，可以设置抽样比例来减少验证时间
+# 0表示不抽样，100表示全部验证
+VERIFY_SAMPLING_RATIO=20
+
+# 是否在验证失败时发送通知 (true/false)
+VERIFY_SEND_NOTIFICATION=true
+
+# 验证超时时间（秒）
+# 如果验证时间超过此值，将中断验证并报告超时
+VERIFY_TIMEOUT=3600
