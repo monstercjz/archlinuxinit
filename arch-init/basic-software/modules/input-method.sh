@@ -41,7 +41,7 @@ ensure_log_file() {
     if sudo touch "$LOG_FILE"; then
       echo "日志文件创建完成: $LOG_FILE"
       log "INFO" "日志文件创建完成: $LOG_FILE"
-      sudo chmod 640 "$LOG_FILE"
+      sudo chmod 644 "$LOG_FILE"
       log "INFO" "设置日志文件权限为 640"
     else
       echo "日志文件创建失败"
@@ -136,7 +136,7 @@ install_input_method_package() {
     fi
   else
     if confirm_action; then
-      if run_with_sudo paru -S fcitx5 fcitx5-chinese-addons fcitx5-config-qt; then
+      if paru -S fcitx5 fcitx5-chinese-addons fcitx5-config-qt; then
         echo "输入法安装完成"
         log "INFO" "输入法安装完成"
         configure_environment_variables

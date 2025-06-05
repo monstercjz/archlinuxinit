@@ -41,7 +41,7 @@ ensure_log_file() {
     if sudo touch "$LOG_FILE"; then
       echo "日志文件创建完成: $LOG_FILE"
       log "INFO" "日志文件创建完成: $LOG_FILE"
-      sudo chmod 640 "$LOG_FILE"
+      sudo chmod 644 "$LOG_FILE"
       log "INFO" "设置日志文件权限为 640"
     else
       echo "日志文件创建失败"
@@ -145,15 +145,32 @@ install_with_paru() {
   echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
   log "INFO" "开始使用 paru 安装 $package"
   if confirm_action; then
-    if paru -S "$package" --noconfirm; then
-      echo "$package 安装完成"
-      log "INFO" "$package 安装完成"
-      return 0
+    set -euo pipefail # 建议在所有脚本中使用此行
+
+    # 检查当前用户是否为 root
+    if [[ "$EUID" -eq 0 ]]; then
+        # 如果是 root，尝试以原始用户身份执行 paru
+        if [[ -n "$SUDO_USER" ]]; then
+            echo "当前以 root 身份运行，尝试以用户 '$SUDO_USER' 执行 paru。"
+            if sudo -u "$SUDO_USER" paru -S "$package" --noconfirm; then
+              echo "$package 安装完成"
+              log "INFO" "$package 安装完成"
+              return 0
+            else
+              echo "使用 paru 安装 $package 失败"
+              log "ERROR" "使用 paru 安装 $package 失败"
+              return 1
+            fi
+        else
+            echo "错误: 以 root 身份运行，但无法确定原始用户。请以非 root 用户运行此脚本，或者设置 SUDO_USER 环境变量。" >&2
+            exit 1
+        fi
     else
-      echo "使用 paru 安装 $package 失败"
-      log "ERROR" "使用 paru 安装 $package 失败"
-      return 1
+        # 如果不是 root，直接执行 paru
+        echo "当前以非 root 身份运行，直接执行 paru。"
+        paru -S "$package"  --noconfirm
     fi
+    
   fi
 }
 
@@ -165,14 +182,31 @@ install_with_yay() {
   echo -e "${COLOR_BLUE}==============================${COLOR_RESET}"
   log "INFO" "开始使用 yay 安装 $package"
   if confirm_action; then
-    if yay -S "$package" --noconfirm; then
-      echo "$package 安装完成"
-      log "INFO" "$package 安装完成"
-      return 0
+    set -euo pipefail # 建议在所有脚本中使用此行
+
+    # 检查当前用户是否为 root
+    if [[ "$EUID" -eq 0 ]]; then
+        # 如果是 root，尝试以原始用户身份执行 paru
+        if [[ -n "$SUDO_USER" ]]; then
+            echo "当前以 root 身份运行，尝试以用户 '$SUDO_USER' 执行 yay"
+            if sudo -u "$SUDO_USER" yay -S "$package" --noconfirm; then
+              echo "$package 安装完成"
+              log "INFO" "$package 安装完成"
+              return 0
+            else
+              echo "使用 yay 安装 $package 失败"
+              log "ERROR" "使用 yay 安装 $package 失败"
+              return 1
+            fi
+            
+        else
+            echo "错误: 以 root 身份运行，但无法确定原始用户。请以非 root 用户运行此脚本，或者设置 SUDO_USER 环境变量。" >&2
+            exit 1
+        fi
     else
-      echo "使用 yay 安装 $package 失败"
-      log "ERROR" "使用 yay 安装 $package 失败"
-      return 1
+        # 如果不是 root，直接执行 paru
+        echo "当前以非 root 身份运行，直接执行 yay。"
+        yay -S "$package"  --noconfirm
     fi
   fi
 }

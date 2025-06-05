@@ -42,7 +42,7 @@ ensure_log_file() {
     if sudo touch "$LOG_FILE"; then
       echo "日志文件创建完成: $LOG_FILE"
       log "INFO" "日志文件创建完成: $LOG_FILE"
-      sudo chmod 640 "$LOG_FILE"
+      sudo chmod 644 "$LOG_FILE"
       log "INFO" "设置日志文件权限为 640"
     else
       echo "日志文件创建失败"
